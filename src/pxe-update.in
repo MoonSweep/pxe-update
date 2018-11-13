@@ -1,6 +1,6 @@
 #! /bin/sh
 
-# pxe-update v1.0
+# @PACKAGE@ v@VERSION@
 # Shell script to automate maintenance of a PXE server
 # Copyright (c) 2018 Raphaël Halimi <raphael.halimi@gmail.com>
 # License: GPL-3
@@ -17,8 +17,8 @@
 SCRIPT_NAME="$(basename "$0")"
 
 # Configuration files
-SYSTEM_CONFIG_FILE="/usr/local/etc/$SCRIPT_NAME/${SCRIPT_NAME}.conf"
-USER_CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/$SCRIPT_NAME/${SCRIPT_NAME}.conf"
+SYSTEM_CONFIG_FILE="@pkgsysconfdir@/@PACKAGE@.conf"
+USER_CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/@PACKAGE@/@PACKAGE@.conf"
 
 # Options defaults
 PXE_ROOT_DIR="/srv/tftp"
@@ -233,10 +233,10 @@ BOOT_SCREENS_DIR="$PXE_ROOT_DIR/boot-screens"
 PXE_MAIN_MENU="$BOOT_SCREENS_DIR/menu.cfg"
 PXE_CONFIG_DIR="$PXE_ROOT_DIR/pxelinux.cfg"
 PXE_CONFIG_DEFAULT="$PXE_CONFIG_DIR/default"
-SYSTEM_CUSTOM_DIR="/usr/local/etc/$SCRIPT_NAME/boot-screens.d"
-USER_CUSTOM_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/$SCRIPT_NAME/boot-screens.d"
-SYSTEM_DATA_DIR="/usr/local/share/$SCRIPT_NAME"
-USER_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$SCRIPT_NAME"
+SYSTEM_CUSTOM_DIR="@pkgsysconfdir@/boot-screens.d"
+USER_CUSTOM_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/@PACKAGE@/boot-screens.d"
+SYSTEM_DATA_DIR="@pkgdatadir@"
+USER_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/@PACKAGE@"
 RELEASE_MAIN="$(printf "%s" "$RELEASES_LIST" | cut -d " " -f 1)"
 DISTRO_MAIN="$(printf "%s" "$RELEASE_MAIN" | cut -d : -f 1)"
 ARCH_MAIN="$(printf "%s" "$ARCH_LIST" | cut -d " " -f 1)"

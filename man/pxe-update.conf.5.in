@@ -7,11 +7,11 @@ pxe-update.conf \- \fBpxe-update\fR configuration file
 
 .SH SYNOPSIS
 .TP
-.B /usr/local/etc/pxe-update/pxe-update.conf
+.B @pkgsysconfdir@/@PACKAGE@.conf
 System-wide configuration file.
 
 .TP
-.B $XDG_CONFIG_HOME/pxe-update/pxe-update.conf
+.B $XDG_CONFIG_HOME/@PACKAGE@/@PACKAGE@.conf
 Per-user configuration file.
 
 .SH DESCRIPTION

@@ -110,36 +110,36 @@ only Live CD boot images are supported.
 .SH FILES
 
 .TP
-.B /usr/local/etc/pxe-update/pxe-update.conf
+.B @pkgsysconfdir@/@PACKAGE@.conf
 System-wide configuration file.
 
 .TP
-.B /usr/local/etc/pxe-update/boot-screens.d
+.B @pkgsysconfdir@/boot-screens.d
 System-wide directory containing custom PXE configuration files and keymap
 files.
 
 .TP
-.B /usr/local/share/pxe-update
+.B @pkgdatadir@
 System-wide data directory.
 
 .TP
-.B /usr/local/share/pxe-update/themes
+.B @pkgdatadir@/themes
 System-wide themes directory.
 
 .TP
-.B $XDG_CONFIG_HOME/pxe-update/pxe-update.conf
+.B $XDG_CONFIG_HOME/@PACKAGE@/@PACKAGE@.conf
 Per-user configuration file.
 
 .TP
-.B $XDG_CONFIG_HOME/pxe-update/boot-screens.d
+.B $XDG_CONFIG_HOME/@PACKAGE@/boot-screens.d
 Per-user directory containing custom PXE configuration files and keymap files.
 
 .TP
-.B $XDG_DATA_HOME/pxe-update
+.B $XDG_DATA_HOME/@PACKAGE@
 Per-user data directory.
 
 .TP
-.B $XDG_DATA_HOME/pxe-update/themes
+.B $XDG_DATA_HOME/@PACKAGE@/themes
 Per-user themes directory.
 
 .SH CAVEATS

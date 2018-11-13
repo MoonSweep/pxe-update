@@ -1,0 +1,44 @@
+#!/bin/sh
+
+print_usage () {
+  printf "Usage: %s [OPTIONS]\n" "$0"
+  printf "Regenerate autotools files\n"
+  printf "\nOPTIONS:\n"
+  printf "%s\t%s\n" "-c, --clean" "Clean only, do not regenerate files"
+  printf "%s\t%s\n" "-h, --help" "Print this help message"
+}
+
+# Analyze options
+for OPTION in $@ ; do
+  case "$OPTION" in
+    -*)
+      case "$OPTION" in
+        -c|--clean) CLEAN_ONLY="yes" ;;
+        -h|--help) print_usage ; exit 0 ;;
+        *) printf "Unknown option \"%s\"\n" "$OPTION" ; print_usage ; exit 1 ;;
+      esac
+      ;;
+    *) printf "Ignoring argument \"%s\"\n" "$OPTION" ;;
+  esac
+done
+
+# If there is still a Makefile, call it with the "distclean" target
+[ -f Makefile ] && make distclean
+
+# Remove autotools files
+rm -f \
+  aclocal.m4 \
+  configure \
+  install-sh \
+  missing \
+  Makefile.in
+
+# If clean option was specified, we're done
+[ "$CLEAN_ONLY" = "yes" ] && exit 0
+
+# Run autoreconf to regenerate the configure script and other needed files
+# Step by step: aclocal && autoconf && automake --add-missing
+autoreconf --install --force
+
+# Delete useless cache files
+rm -rf autom4te.cache
