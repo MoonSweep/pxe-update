@@ -1,0 +1,1357 @@
+#! /bin/sh
+
+# pxe-update v1.0
+# Shell script to automate maintenance of a PXE server
+# Copyright (c) 2018 Raphaël Halimi <raphael.halimi@gmail.com>
+# License: GPL-3
+
+# Source shell-script-helper
+. /lib/shell-script-helper
+
+
+#
+# Variables
+#
+
+# Script name
+SCRIPT_NAME="$(basename "$0")"
+
+# Configuration files
+SYSTEM_CONFIG_FILE="/usr/local/etc/$SCRIPT_NAME/${SCRIPT_NAME}.conf"
+USER_CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/$SCRIPT_NAME/${SCRIPT_NAME}.conf"
+
+# Options defaults
+PXE_ROOT_DIR="/srv/tftp"
+RELEASES_LIST="debian:stable"
+ARCH_LIST="i386 amd64"
+MIRROR_DEBIAN="http://ftp.debian.org"
+MIRROR_UBUNTU="http://archive.ubuntu.com"
+MIRROR_MINT="http://packages.linuxmint.com"
+PRESEED_URL=""
+ADD_BOOT_OPTIONS=""
+NO_VGA=0
+LIVE_ENABLE=0
+LIVE_URL_SUGGEST=0
+LIVE_ISO_DIR="/mnt/nfs/iso"
+LIVE_TFTP_DIR="/mnt/nfs/tftp"
+LIVE_NFS_SERVER_IP="192.168.1.1"
+LIVE_NFS_SERVER_DIR="/tftp"
+LIVE_LOCALE="en_US.UTF-8"
+LIVE_KEYBOARD="us"
+LIVE_NONFREE=0
+LIVE_MIRROR_DEBIAN="http://cdimage.debian.org"
+LIVE_MIRROR_UBUNTU="http://releases.ubuntu.com"
+LIVE_MIRROR_MINT="http://mirrors.kernel.org/linuxmint"
+LIVE_DESKTOP_LIST_DEBIAN_7="standard rescue gnome-desktop kde-desktop xfce-desktop lxde-desktop"
+LIVE_DESKTOP_LIST_DEBIAN_8="standard gnome-desktop kde-desktop xfce-desktop lxde-desktop mate-desktop cinnamon-desktop"
+LIVE_DESKTOP_LIST_DEBIAN_9="gnome kde xfce lxde mate cinnamon"
+LIVE_DESKTOP_LIST_UBUNTU="desktop"
+LIVE_DESKTOP_LIST_MINT="cinnamon mate kde xfce"
+LIVE_DESKTOP_LIST_LMDE="cinnamon mate"
+PXE_KEYMAP=""
+PXE_THEME="default"
+PXE_BANNER=""
+REMOVE_OLD=0
+VERBOSE=0
+DEBUG=0
+
+
+#
+# Functions
+#
+
+on_exit () {
+  delete_files "$RELEASE_FILE" "$PORTS_FILE" "$LOCK_FILE"
+  if [ -n "$ISO_MOUNT_DIR" ] ; then
+    if [ -d "$ISO_MOUNT_DIR" ] ; then
+      print_verbose "Unmounting $ISO_MOUNT_DIR"
+      fusermount -u "$ISO_MOUNT_DIR"
+    fi
+  fi
+}
+
+print_usage () {
+  printf "Usage: %s [OPTION]... [DISTRIBUTION:CODENAME|SUITE]...\n" "$SCRIPT_NAME"
+  printf "Shell script to automate maintenance of a PXE server\n"
+  printf "\nOPTIONS:\n"
+  print_option "-r" "Remove unrequested distributions."
+  print_option "-v" "Verbose mode."
+  print_option "-d" "Debug mode."
+  print_option "-h" "Print this help message."
+  printf "\nEach argument is a release to download. A release takes the form of a\n"
+  printf "DISTRIBUTION, followed by a colon, followed by a CODENAME or a SUITE.\n"
+  printf "\nDISTRIBUTION can be \"debian\", \"ubuntu\" or \"mint\".\n"
+  printf "CODENAME is a one-word release codename like \"wheezy\", \"raring\" or \"sarah\"\n"
+  printf "SUITE is a suite name like \"stable\" or \"devel\". Valid suite names are:\n"
+  printf "\nDebian: \"stable\", \"testing\", \"unstable\" \"oldstable\" and \"oldoldstable\".\n"
+  printf "Ubuntu: \"stable\", \"devel\" (or \"unstable\"), \"oldstable\", \"lts\" and \"oldlts\".\n"
+  printf "Mint: \"stable\" and \"lmde\".\n"
+}
+
+# Print a message and continue to next iteration: <message>
+abort_loop() {
+  print_error "$1, aborting $RELEASE"
+  delete_files "$RELEASE_FILE"
+  continue
+}
+
+# Download a single remote file: <URL> <local name>
+get_remote_file () {
+  print_verbose "Downloading $1"
+  $LFTP_BIN -c "get1 $1 -o $2" > /dev/null 2>&1
+  if [ $? -ne 0 ] ; then
+    die "problem occured while trying to download file $1"
+  fi
+}
+
+# Check if remote directory exists: <URL>
+check_remote_dir () {
+  print_verbose "Checking $1"
+  $LFTP_BIN -c "cd $1" > /dev/null 2>&1
+}
+
+# Mirror remote directory: <URL> <local directory>
+mirror_remote_dir () {
+  print_verbose "Mirroring $1 to $2"
+  $LFTP_BIN -c "mirror $1 $2" > /dev/null 2>&1
+  if [ $? -ne 0 ] ; then
+    abort_loop "problem occured while trying to mirror directory $1"
+  fi
+}
+
+# Replace some text: <sed substitute command> <input file>...
+# WARNING: using sub-expressions will mess up the comments and verbose output
+# (but the substitution itself will work fine)
+replace() {
+  local SED_COMMAND PATTERN_FROM PATTERN_TO COMMENT
+  SED_COMMAND="$1" ; shift
+  print_debug_var "SED_COMMAND"
+  if [ "$(printf "%s" "$SED_COMMAND" | cut -c 1)" != "s" ] ; then
+    print_error "\"$SED_COMMAND\" doesn't seem to be a sed substitute command."
+    return 1
+  fi
+  SED_COMMAND_SEPARATOR="$(printf "%s" "$SED_COMMAND" | cut -c 2)"
+  print_debug_var "SED_COMMAND_SEPARATOR"
+  if [ $# -ne 0 ] ; then
+    PATTERN_FROM="$(echo "$SED_COMMAND" | cut -d "$SED_COMMAND_SEPARATOR" -f 2)"
+    PATTERN_TO="$(echo "$SED_COMMAND" | cut -d "$SED_COMMAND_SEPARATOR" -f 3)"
+    COMMENT="\"$PATTERN_FROM\" --> \"$PATTERN_TO\""
+    print_debug_var "PATTERN_FROM" "PATTERN_TO" "COMMENT"
+    print_verbose "Modifying files: $COMMENT"
+    sed -r -i -e "$SED_COMMAND" -e "1s$SED_COMMAND_SEPARATOR^$SED_COMMAND_SEPARATOR# Modified by $SCRIPT_NAME: $COMMENT\n$SED_COMMAND_SEPARATOR" "$@"
+    if [ $? -ne 0 ] ; then
+      abort_loop "problem occured during file modification"
+    fi
+  fi
+}
+
+# Prints a variable name/value on STDOUT only if the DEBUG variable is equal to 1.
+# Args: one or more variable names
+print_debug_var() {
+  local NAME
+  [ $DEBUG -eq 1 ] && for NAME in "$@" ; do
+    eval VALUE="$(eval printf "%s" "'$'$NAME")"
+    printf "%-8s%s=\"%s\"\n" "[DEBUG]" "$NAME" "$VALUE"
+  done
+}
+
+# Checks if a binary is found in $PATH, and sets a variable <BINARY>_BIN.
+# If <binary> contains space, it will be treated as a list of equivalent binaries
+# Args: one or more binary names
+check_deps() {
+  local PRIMARY_BINARY BINARY SUB_BINARY BINARY_PATH
+  for BINARY in "$@" ; do
+    print_debug_var "BINARY"
+    PRIMARY_BINARY="$(echo "$BINARY" | cut -d ' ' -f 1 | tr '[:lower:]' '[:upper:]')"
+    print_debug_var "PRIMARY_BINARY"
+    for SUB_BINARY in $BINARY ; do
+      print_debug_var "SUB_BINARY"
+      BINARY_PATH="$(which "$SUB_BINARY")"
+      print_debug_var "BINARY_PATH"
+      if [ -n "$BINARY_PATH" ] ; then
+        eval "${PRIMARY_BINARY}"_BIN="$BINARY_PATH"
+        print_debug_var "${PRIMARY_BINARY}_BIN"
+        break
+      fi
+    done
+  done
+}
+
+# Set distribution info
+set_distrib_info() {
+  case "$DISTRIB" in
+    debian)
+      DISTRIB_FULL="Debian GNU/Linux"
+      BASE_URL="$MIRROR_DEBIAN"
+      ;;
+    ubuntu)
+      DISTRIB_FULL="Ubuntu Linux"
+      BASE_URL="$MIRROR_UBUNTU"
+      ;;
+    mint)
+      DISTRIB_FULL="Linux Mint"
+      BASE_URL="$MIRROR_MINT"
+      ;;
+  esac
+  print_debug_var "DISTRIB_FULL" "BASE_URL"
+}
+
+
+#
+# Configuration files
+#
+
+[ -f "$SYSTEM_CONFIG_FILE" ] && . "$SYSTEM_CONFIG_FILE"
+[ -f "$USER_CONFIG_FILE" ] && . "$USER_CONFIG_FILE"
+
+
+#
+# Options processing
+#
+
+while getopts "rvdh" OPTION ; do
+  case $OPTION in
+    r) REMOVE_OLD=1 ;;
+    v) enable_verbose ;;
+    d) enable_debug ;;
+    h) print_usage ; exit 0 ;;
+    *) print_usage ; exit 1 ;;
+  esac
+done ; shift $((OPTIND-1))
+
+# Sanitize non-string options
+for OPTION in NO_VGA LIVE_ENABLE LIVE_URL_SUGGEST LIVE_NONFREE REMOVE_OLD VERBOSE DEBUG ; do
+  if ( [ "$(eval printf "%s" "\$$OPTION")" != "0" ] && [ "$(eval printf "%s" "\$$OPTION")" != "1" ] ) ; then
+    print_error "Option $OPTION value $(eval printf "%s" "\$$OPTION") invalid, resetting to 0"
+    eval $OPTION=0
+    print_debug_var "$OPTION"
+  fi
+done
+
+[ $# -ne 0 ] && RELEASES_LIST="$@"
+BOOT_SCREENS_DIR="$PXE_ROOT_DIR/boot-screens"
+PXE_MAIN_MENU="$BOOT_SCREENS_DIR/menu.cfg"
+PXE_CONFIG_DIR="$PXE_ROOT_DIR/pxelinux.cfg"
+PXE_CONFIG_DEFAULT="$PXE_CONFIG_DIR/default"
+SYSTEM_CUSTOM_DIR="/usr/local/etc/$SCRIPT_NAME/boot-screens.d"
+USER_CUSTOM_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/$SCRIPT_NAME/boot-screens.d"
+SYSTEM_DATA_DIR="/usr/local/share/$SCRIPT_NAME"
+USER_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$SCRIPT_NAME"
+RELEASE_MAIN="$(printf "%s" "$RELEASES_LIST" | cut -d " " -f 1)"
+DISTRO_MAIN="$(printf "%s" "$RELEASE_MAIN" | cut -d : -f 1)"
+ARCH_MAIN="$(printf "%s" "$ARCH_LIST" | cut -d " " -f 1)"
+PROCESSED_RELEASES_LIST=""
+PROCESSED_DISTRIBS_LIST=""
+[ $LIVE_NONFREE -eq 1 ] && { NONFREE_SUBDIR="/unofficial/non-free/cd-including-firmware" ; NONFREE_SUFFIX="+nonfree" ; }
+LIVE_URL_SUGGEST_HEADER_DISPLAYED=0
+RELEASE_MAIN_OK=0
+
+print_debug_var \
+  "PXE_ROOT_DIR" \
+  "RELEASES_LIST" \
+  "ARCH_LIST" \
+  "MIRROR_DEBIAN" \
+  "MIRROR_UBUNTU" \
+  "MIRROR_MINT" \
+  "PRESEED_URL" \
+  "ADD_BOOT_OPTIONS" \
+  "NO_VGA" \
+  "LIVE_ENABLE" \
+  "LIVE_URL_SUGGEST" \
+  "LIVE_ISO_DIR" \
+  "LIVE_TFTP_DIR" \
+  "LIVE_NFS_SERVER_IP" \
+  "LIVE_NFS_SERVER_DIR" \
+  "LIVE_LOCALE" \
+  "LIVE_KEYBOARD" \
+  "LIVE_NONFREE" \
+  "LIVE_MIRROR_DEBIAN" \
+  "LIVE_MIRROR_UBUNTU" \
+  "LIVE_MIRROR_MINT" \
+  "LIVE_DESKTOP_LIST_DEBIAN_7" \
+  "LIVE_DESKTOP_LIST_DEBIAN_8" \
+  "LIVE_DESKTOP_LIST_DEBIAN_9" \
+  "LIVE_DESKTOP_LIST_UBUNTU" \
+  "LIVE_DESKTOP_LIST_MINT" \
+  "LIVE_DESKTOP_LIST_LMDE" \
+  "PXE_KEYMAP" \
+  "PXE_THEME" \
+  "PXE_BANNER" \
+  "REMOVE_OLD" \
+  "VERBOSE" \
+  "DEBUG" \
+  "BOOT_SCREENS_DIR" \
+  "PXE_MAIN_MENU" \
+  "PXE_CONFIG_DIR" \
+  "PXE_CONFIG_DEFAULT" \
+  "SYSTEM_CUSTOM_DIR" \
+  "USER_CUSTOM_DIR" \
+  "SYSTEM_DATA_DIR" \
+  "USER_DATA_DIR" \
+  "RELEASE_MAIN" \
+  "DISTRO_MAIN" \
+  "ARCH_MAIN" \
+  "PROCESSED_RELEASES_LIST" \
+  "PROCESSED_DISTRIBS_LIST" \
+  "NONFREE_SUBDIR" \
+  "NONFREE_SUFFIX" \
+  "LIVE_URL_SUGGEST_HEADER_DISPLAYED" \
+  "RELEASE_MAIN_OK"
+
+
+#
+# Checks
+#
+
+# We don't want to run more than one instance at a time
+lock_script
+
+# Check dependencies
+check_deps lftp fuseiso rsync identify convert
+[ -z "$LFTP_BIN" ] && die "Binary \"lftp\" not found"
+[ -z "$FUSEISO_BIN" ] && print_verbose "Binary fuseiso not found, unable to process ISO images (consider installing fuseiso)"
+[ -z "$RSYNC_BIN" ] && print_verbose "Binary rsync not found, ISO image contents will be fully copied even if up-to-date (consider installing rsync)"
+[ -z "$IDENTIFY_BIN" ] && print_verbose "Binary \"identify\" not found, unable to resize old format splash screens (consider installing imagemagick)"
+[ -z "$CONVERT_BIN" ] && print_verbose "Binary \"convert\" not found, unable to resize old format splash screens (consider installing imagemagick)"
+
+# Check if DISTRO_MAIN does provide netboot images
+[ "$DISTRO_MAIN" = "debian" ] || [ "$DISTRO_MAIN" = "ubuntu" ] || die "First release must be debian or ubuntu"
+
+
+#
+# Let's start
+#
+
+print_verbose "##### Preparing PXE tree in $PXE_ROOT_DIR #####"
+
+# Check base directories
+for BASE_DIR in "$PXE_ROOT_DIR" "$BOOT_SCREENS_DIR" "$PXE_CONFIG_DIR" ; do
+  print_debug_var "BASE_DIR"
+  if [ -d "$BASE_DIR" ] ; then
+    # If directory exists, try to clean it
+    if [ -w "$BASE_DIR" ] ; then
+      print_verbose "Cleaning files from previous runs in directory $BASE_DIR"
+      delete_files $(find -H "$BASE_DIR" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) )
+    else
+      # If it's not writable, die
+      die "Cannot write to directory $BASE_DIR"
+    fi
+  else
+    # If directory doesn't exist, create it or die
+    print_verbose "Creating directory $BASE_DIR"
+    mkdir "$BASE_DIR" || die "Cannot create $BASE_DIR directory"
+  fi
+done
+
+# We need to download this only once
+PORTS_FILE=/tmp/Ports.$$
+print_debug_var "PORTS_FILE"
+get_remote_file "http://www.debian.org/ports/index.en.html" "$PORTS_FILE"
+
+
+#
+# MAIN LOOP
+#
+
+# Loop through releases
+for RELEASE in $RELEASES_LIST ; do
+
+  print_debug_var "RELEASE"
+
+  SUITE=""
+  DISTRIB=$(echo "$RELEASE" | cut -d ":" -f 1)
+  CODENAME=$(echo "$RELEASE" | cut -d ":" -f 2)
+  RELEASE_FILE="/tmp/$DISTRIB-$CODENAME-Release.$$"
+  print_debug_var "SUITE" "DISTRIB" "CODENAME" "RELEASE_FILE"
+  print_verbose "##### Processing release: $DISTRIB $CODENAME #####"
+
+  # Information gathering
+
+  case "$DISTRIB" in 
+    debian)
+      set_distrib_info
+      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+      if [ $? -ne 0 ] ; then
+        print_verbose "Couldn't find netboot directory on regular server, trying archive server"
+        BASE_URL="http://archive.debian.org"
+        print_debug_var "BASE_URL"
+        check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+        if [ $? -ne 0 ] ; then
+          abort_loop "couldn't find netboot directory"
+        fi
+      fi
+      get_remote_file "$BASE_URL/$DISTRIB/dists/$CODENAME/Release" "$RELEASE_FILE"
+      CODENAME=$(grep "^Codename" "$RELEASE_FILE" | cut -d " " -f 2)
+      CODENAME_FULL=$(echo "$CODENAME" | sed -e "s/^./\u&/")
+      VERSION=$(grep "^Version" "$RELEASE_FILE" | cut -d " " -f 2)
+      SUITE=$(grep "^Suite" "$RELEASE_FILE" | cut -d " " -f 2)
+      # For Testing and Unstable, set bogus versions to list them at the end
+      [ "$SUITE" = "unstable" ] && VERSION="0.1"
+      [ "$SUITE" = "testing" ] && VERSION="0.2"
+      DEBIAN_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "DEBIAN_VER_MAJ"
+      delete_files "$RELEASE_FILE"
+      ;;
+
+    ubuntu)
+
+      set_distrib_info
+
+      # Get Ubuntu devel info
+      if [ -z "$UBUNTU_DEVEL" ] ; then
+        get_remote_file "$BASE_URL/$DISTRIB/dists/devel/Release" "$RELEASE_FILE"
+        UBUNTU_DEVEL=$(grep "^Codename" "$RELEASE_FILE" | cut -d " " -f 2)
+        UBUNTU_DEVEL_VERSION=$(grep "^Version" "$RELEASE_FILE" | cut -d " " -f 2)
+        UBUNTU_DEVEL_VER_MAJ=$(echo "$UBUNTU_DEVEL_VERSION" | cut -d "." -f 1)
+        UBUNTU_DEVEL_VER_MIN=$(echo "$UBUNTU_DEVEL_VERSION" | cut -d "." -f 2)
+        print_debug_var "UBUNTU_DEVEL" "UBUNTU_DEVEL_VERSION" "UBUNTU_DEVEL_VER_MAJ" "UBUNTU_DEVEL_VER_MIN"
+        delete_files "$RELEASE_FILE"
+      fi
+
+      # Ubuntu "Suite" conversion
+      # I don't like the idea to rely on parsing a web page but with Ubuntu I didn't find anything better
+      get_remote_file "http://releases.ubuntu.com" "$RELEASE_FILE"
+      if [ -z "$UBUNTU_STABLE" ] ; then
+        UBUNTU_STABLE=$(grep "<li>.*Ubuntu" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
+        UBUNTU_STABLE_VERSION=$(grep "<li>.*Ubuntu" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*Ubuntu //" -e "s/ .*$//")
+        UBUNTU_STABLE_VER_MAJ=$(echo "$UBUNTU_STABLE_VERSION" | cut -d "." -f 1)
+        UBUNTU_STABLE_VER_MIN=$(echo "$UBUNTU_STABLE_VERSION" | cut -d "." -f 2)
+        UBUNTU_LTS=$(grep "<li>.*Ubuntu.*LTS" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
+        UBUNTU_OLDSTABLE=$(grep "<li>.*Ubuntu" "$RELEASE_FILE" | head -n 2 | tail -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
+        UBUNTU_OLDLTS=$(grep "<li>.*Ubuntu.*LTS" "$RELEASE_FILE" | head -n 2 | tail -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
+        print_debug_var "UBUNTU_STABLE" "UBUNTU_STABLE_VERSION" "UBUNTU_STABLE_VER_MAJ" "UBUNTU_STABLE_VER_MIN" "UBUNTU_LTS" "UBUNTU_OLDSTABLE" "UBUNTU_OLDLTS"
+      fi
+
+      # For Ubuntu devel, set bogus version to list it at the end
+      if [ "$CODENAME" = "devel" ] || [ "$CODENAME" = "unstable" ] || [ "$CODENAME" = "$UBUNTU_DEVEL" ] ; then
+        CODENAME="$UBUNTU_DEVEL"
+        CODENAME_FULL=$(echo "$CODENAME" | sed -e "s/^./\u&/")
+        VERSION="0.1"
+        SUITE="devel"
+
+        # We need this because Ubuntu rolls back some versions prior to creating a new devel distro
+        if ( [ "$UBUNTU_DEVEL_VER_MAJ" -lt "$UBUNTU_STABLE_VER_MAJ" ] || ( [ "$UBUNTU_DEVEL_VER_MAJ" -eq "$UBUNTU_STABLE_VER_MAJ" ] && [ "$UBUNTU_DEVEL_VER_MIN" -le "$UBUNTU_STABLE_VER_MIN" ] ) ) ; then
+          delete_files "$PXE_ROOT_DIR/dists/$DISTRIB/$SUITE"
+          abort_loop "New Ubuntu stable version released recently, devel version not available yet"
+        fi
+
+      else
+
+        case "$CODENAME" in
+          stable|"$UBUNTU_STABLE")
+            CODENAME="$UBUNTU_STABLE" ; SUITE="stable" ;;
+          oldstable|"$UBUNTU_OLDSTABLE")
+            CODENAME="$UBUNTU_OLDSTABLE" ; SUITE="oldstable" ;;
+          lts|"$UBUNTU_LTS")
+            CODENAME="$UBUNTU_LTS" ; SUITE="lts" ;;
+          oldlts|"$UBUNTU_OLDLTS")
+            CODENAME="$UBUNTU_OLDLTS" ; SUITE="oldlts" ;;
+        esac
+        CODENAME_FULL=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*(//" -e "s/).*$//")
+        VERSION=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*Ubuntu //" -e "s/ (.*$//")
+        UBUNTU_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
+        UBUNTU_VER_MIN=$(echo "$VERSION" | cut -d "." -f 2)
+      fi
+
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "UBUNTU_VER_MAJ" "UBUNTU_VER_MIN"
+
+      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+      if [ $? -ne 0 ] ; then
+        abort_loop "couldn't find netboot directory"
+      fi
+
+      delete_files "$RELEASE_FILE"
+      ;;
+
+    mint)
+
+      set_distrib_info
+
+      # Mint "Suite" conversion
+      if [ -z "$MINT_STABLE" ] ; then
+        get_remote_file "https://www.linuxmint.com/download.php" "$RELEASE_FILE"
+        MINT_STABLE="$(grep "^<h1>Download Linux Mint.*<\/h1>$" "$RELEASE_FILE" | sed -r -e "s/^<h1>Download Linux Mint [0-9\.]+ (\w+)<\/h1>$/\L\1/")"
+        delete_files "$RELEASE_FILE"
+        get_remote_file "https://www.linuxmint.com/download_lmde.php" "$RELEASE_FILE"
+        MINT_LMDE="$(grep "^<h1>Download LMDE.*<\/h1>$" "$RELEASE_FILE" | sed -r -e "s/^<h1>Download LMDE [0-9\.]+ (\w+)<\/h1>$/\L\1/")"
+        delete_files "$RELEASE_FILE"
+        print_debug_var "MINT_STABLE" "MINT_LMDE"
+      fi
+
+      case "$CODENAME" in
+        stable|"$MINT_STABLE")
+          CODENAME="$MINT_STABLE" ; SUITE="stable" ;;
+        lmde|"$MINT_LMDE")
+          CODENAME="$MINT_LMDE" ; SUITE="LMDE" ; DISTRIB_FULL="$DISTRIB_FULL Debian Edition" ;;
+      esac
+
+      check_remote_dir "$BASE_URL/dists/$CODENAME"
+      if [ $? -ne 0 ] ; then
+        abort_loop "couldn't find packages directory"
+      fi
+
+      get_remote_file "$BASE_URL/dists/$CODENAME/Release" "$RELEASE_FILE"
+      CODENAME_FULL=$(echo "$CODENAME" | sed -e "s/^./\u&/")
+      VERSION=$(grep "^Version" "$RELEASE_FILE" | cut -d " " -f 2)
+      MINT_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "MINT_VER_MAJ"
+
+      delete_files "$RELEASE_FILE"
+      ;;
+
+    *)
+
+    abort_loop "unsupported distribution $DISTRIB"
+    ;;
+
+  esac
+
+  # Check if the distro has already been processed
+  echo "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME"
+  if [ $? -eq 0 ] ; then
+    print_verbose "Not updating $DISTRIB $CODENAME: already processed"
+  else
+
+    # Now we can perform the actual update
+    print_verbose \
+      "Distribution: $DISTRIB_FULL ($DISTRIB)" \
+      "Codename: $CODENAME_FULL ($CODENAME)" \
+      "Version: $VERSION" \
+      "Suite: $SUITE" \
+      "Server: $BASE_URL"
+
+    # Release menu file starts here
+    CODENAME_MENU_FILE="$BOOT_SCREENS_DIR/$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-${CODENAME}.cfg"
+    CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$ARCH_MAIN/boot-screens/stdmenu.cfg"
+    if ( [ "$DISTRIB" = "mint" ] && [ "$SUITE" = "LMDE" ] ) ; then
+      SPLASH_EXT="jpg"
+    else
+      SPLASH_EXT="png"
+    fi
+    if ( [ "$SUITE" = "testing" ] || [ "$SUITE" = "unstable" ] || [ "$SUITE" = "devel" ] ) ; then
+      DISPLAYED_VERSION="$SUITE"
+    else
+      DISPLAYED_VERSION="$VERSION"
+    fi
+    CODENAME_LABEL="$DISTRIB_FULL $DISPLAYED_VERSION (^$CODENAME_FULL)"
+    print_debug_var "CODENAME_MENU_FILE" "SPLASH_EXT" "DISPLAYED_VERSION" "CODENAME_LABEL"
+    print_verbose "Creating $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
+    printf "%s\n%s\n%s\n%s\n" \
+      "INCLUDE $CODENAME_STDMENU_FILE" \
+      "MENU LABEL $CODENAME_LABEL" \
+      "MENU TITLE $(echo "$CODENAME_LABEL" | tr -d ^)" \
+      "MENU TABMSG Please select an architecture" \
+      > "$CODENAME_MENU_FILE"
+
+    # Loop through architectures for this release
+    for ARCH in $ARCH_LIST ; do
+
+      print_debug_var "ARCH"
+
+      print_verbose "Processing architecture: $ARCH"
+
+      # Update working directory and create arch directory if needed
+      WORK_DIR="$PXE_ROOT_DIR/dists/$DISTRIB/$CODENAME/$ARCH"
+      print_debug_var "WORK_DIR"
+      [ -d "$WORK_DIR" ] || mkdir -p "$WORK_DIR"
+
+      # Text installer
+      if [ "$DISTRIB" != "mint" ] ; then
+
+        # Mirror netboot directory
+        NETBOOT_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
+        print_debug_var "NETBOOT_DIR"
+        mirror_remote_dir "$NETBOOT_DIR/$DISTRIB-installer/$ARCH" "$WORK_DIR"
+
+        #
+        # Files modification
+        #
+
+        # Modify paths to point to the right location
+        replace "s,$DISTRIB-installer/$ARCH,dists/$DISTRIB/$CODENAME/$ARCH,g" $(grep -lr "$DISTRIB-installer/$ARCH" $(find -H "$WORK_DIR" -type f \( -name "*.cfg" -o -name "default" \)))
+
+        # Add preseed URL
+        if [ -n "$PRESEED_URL" ] ; then
+          replace "s,auto=true,auto=true url=$PRESEED_URL," $(grep -lr "auto=true" $(find -H "$WORK_DIR" -type f -name "*.cfg"))
+        fi
+
+        # Add boot options
+        if [ -n "$ADD_BOOT_OPTIONS" ] ; then
+          replace "s/( ---{0,1})( quiet){0,1}( {0,1})$/\1\2 $ADD_BOOT_OPTIONS\3/" $(grep -Elr "( ---{0,1})( quiet){0,1}( {0,1})$" $(find -H "$WORK_DIR" -type f -name "*.cfg"))
+        fi
+
+        # Remove "vga="
+        if [ $NO_VGA -eq 1 ] ; then
+          replace "s/[[:blank:]]+vga=[^[:blank:]]+//" $(grep -Elr "[[:blank:]]+vga=[^[:blank:]]+" $(find -H "$WORK_DIR" -type f -name "*.cfg"))
+        fi
+
+        # Make GRUB splash screen work
+        GRUB_CONFIG_FILE="$WORK_DIR/grub/grub.cfg"
+        print_debug_var "$GRUB_CONFIG_FILE"
+        if [ -f "$GRUB_CONFIG_FILE" ] ; then
+          replace "s,isolinux/,dists/$DISTRIB/$CODENAME/$ARCH/boot-screens/,g" "$GRUB_CONFIG_FILE"
+        fi
+
+        # Remove non-existent included files (speeds up initial loading and limits "File not found" errors in log files)
+        print_verbose "Modifying files: removing non-existent included files"
+        for CONFIG_FILE in $(find -H "$WORK_DIR/boot-screens" -type f -name "*.cfg") ; do
+          print_debug_var "CONFIG_FILE"
+          for INCLUDE_FILE in $(sed -E "/include/I!d ; s/^.*[[:blank:]]+//" "$CONFIG_FILE") ; do
+            print_debug_var "INCLUDE_FILE"
+            if [ ! -e "$PXE_ROOT_DIR/$INCLUDE_FILE" ] ; then
+              print_debug "Removing non-existent included file $INCLUDE_FILE from $CONFIG_FILE"
+              sed -i -E "\,$INCLUDE_FILE,d" "$CONFIG_FILE"
+            fi
+          done
+        done
+
+      fi
+
+      # Release menu file continues here
+      CODENAME_ORIG_TXT_MENU_FILE="$WORK_DIR/boot-screens/menu.cfg"
+      print_verbose "Appending $ARCH entry to $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
+      ARCH_LONGNAME="$(grep -A 1 "<td>.*$ARCH.*<\/td>$" $PORTS_FILE | head -n 2 | tail -n 1 | sed -e "s/^<td>//" -e "s/<\/td>$//" -e "s/ *($ARCH)$//")"
+      print_debug_var "ARCH_LONGNAME"
+      printf "%s\n\t%s\n\t%s\n\t%s\n%s\n" \
+        "MENU BEGIN $DISTRIB-$CODENAME-$ARCH" \
+        "MENU LABEL $ARCH_LONGNAME (^$ARCH)" \
+        "MENU MARGIN 10" \
+        "INCLUDE ${CODENAME_ORIG_TXT_MENU_FILE#$PXE_ROOT_DIR/}" \
+        "MENU END" \
+        >> "$CODENAME_MENU_FILE"
+
+      # GTK Installer
+      if [ "$DISTRIB" != "mint" ] ; then
+
+        check_remote_dir "$NETBOOT_DIR/gtk"
+        if [ $? -eq 0 ] ; then
+          [ -d "$WORK_DIR/gtk" ] || mkdir "$WORK_DIR/gtk"
+
+          # Mirror GTK netboot directory
+          mirror_remote_dir "$NETBOOT_DIR/gtk/$DISTRIB-installer/$ARCH" "$WORK_DIR/gtk"
+
+          #
+          # Files modification
+          #
+
+          # Modify paths to point to the right location
+          replace "s,$DISTRIB-installer/$ARCH,dists/$DISTRIB/$CODENAME/$ARCH/gtk,g" $(grep -lr "$DISTRIB-installer/$ARCH" $(find -H "$WORK_DIR/gtk" -type f \( -name "*.cfg" -o -name "default" \)))
+
+          # Add preseed URL
+          if [ -n "$PRESEED_URL" ] ; then
+            replace "s,auto=true,auto=true url=$PRESEED_URL," $(grep -lr "auto=true" $(find -H "$WORK_DIR/gtk" -type f -name "*.cfg"))
+          fi
+
+          # Add boot options
+          if [ -n "$ADD_BOOT_OPTIONS" ] ; then
+            replace "s/( ---{0,1})( quiet){0,1}( {0,1})$/\1\2 $ADD_BOOT_OPTIONS\3/" $(grep -Elr "( ---{0,1})( quiet){0,1}( {0,1})$" $(find -H "$WORK_DIR/gtk" -type f -name "*.cfg"))
+          fi
+
+          # Remove "vga="
+          if [ $NO_VGA -eq 1 ] ; then
+            replace "s/[[:blank:]]+vga=[^[:blank:]]+//" $(grep -Elr "[[:blank:]]+vga=[^[:blank:]]+" $(find -H "$WORK_DIR/gtk" -type f -name "*.cfg"))
+          fi
+
+          # Make GRUB splash screen work
+          GRUB_CONFIG_FILE="$WORK_DIR/gtk/grub/grub.cfg"
+          print_debug_var "$GRUB_CONFIG_FILE"
+          if [ -f "$GRUB_CONFIG_FILE" ] ; then
+            replace "s,isolinux/,dists/$DISTRIB/$CODENAME/$ARCH/gtk/boot-screens/,g" "$GRUB_CONFIG_FILE"
+          fi
+
+          # Remove non-existent included files (speeds up initial loading and limits "File not found" errors in log files)
+          print_verbose "Modifying files: removing non-existent included files"
+          for CONFIG_FILE in $(find -H "$WORK_DIR/gtk/boot-screens" -type f -name "*.cfg") ; do
+            print_debug_var "CONFIG_FILE"
+            for INCLUDE_FILE in $(sed -E "/include/I!d ; s/^.*[[:blank:]]+//" "$CONFIG_FILE") ; do
+              print_debug_var "INCLUDE_FILE"
+              if [ ! -e "$PXE_ROOT_DIR/$INCLUDE_FILE" ] ; then
+                print_debug "Removing non-existent included file $INCLUDE_FILE from $CONFIG_FILE"
+                sed -i -E "\,$INCLUDE_FILE,d" "$CONFIG_FILE"
+              fi
+            done
+          done
+
+          # Append back menu entry to GTK menu file
+          CODENAME_ORIG_GTK_MENU_FILE="$WORK_DIR/gtk/boot-screens/menu.cfg"
+          print_verbose "Appending exit entry to $DISTRIB $CODENAME $ARCH GTK menu file $CODENAME_ORIG_GTK_MENU_FILE"
+          printf "%s\n" \
+            "INCLUDE boot-screens/back.cfg" \
+            >> "$CODENAME_ORIG_GTK_MENU_FILE"
+
+          # Append GTK menu file to arch menu file
+          print_verbose "Appending GTK menu file to $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
+          printf "%s\n\t%s\n\t%s\n%s\n" \
+            "MENU BEGIN $DISTRIB-$CODENAME-$ARCH-gtk" \
+            "MENU LABEL ^Graphical Installer" \
+            "INCLUDE ${CODENAME_ORIG_GTK_MENU_FILE#$PXE_ROOT_DIR/}" \
+            "MENU END" \
+            >> "$CODENAME_ORIG_TXT_MENU_FILE"
+
+        fi
+
+      fi
+
+
+      #
+      # Live CD
+      #
+
+      if [ $LIVE_ENABLE -eq 1 ] ; then
+
+        CODENAME_LIVE_MENU_FILE="$WORK_DIR/livecd/menu.cfg"
+        DESKTOP_LIST=""
+        LATEST_ISO_FILE=""
+        LATEST_ISO_URL=""
+        print_debug_var "CODENAME_LIVE_MENU_FILE" "DESKTOP_LIST" "LATEST_ISO_FILE" "LATEST_ISO_URL"
+
+        case "$DISTRIB" in
+
+          debian)
+            # No Live images are provided for Testing and Unstable, and we don't support pre-Wheezy
+            if [ "$DEBIAN_VER_MAJ" -eq 0 ] ; then
+              print_verbose "Live images not available for $DISTRIB $SUITE, skipping ISO processing."
+            elif [ "$DEBIAN_VER_MAJ" -lt 7 ] ; then
+              print_verbose "Live images not supported for $DISTRIB $CODENAME, skipping ISO processing."
+            else
+              # Debian ISOs subdir depends on whether we're processing stable, and if we use non-free
+              if [ "$SUITE" = "stable" ] ; then
+                if [ $LIVE_NONFREE -eq 1 ] ; then
+                  DEBIAN_ISO_SUBDIR=""
+                else
+                  DEBIAN_ISO_SUBDIR="release/"
+                fi
+              else
+                DEBIAN_ISO_SUBDIR="archive/"
+              fi
+              DEBIAN_ISO_PATCHLEVEL=""
+              PATCHLEVEL_FOUND=0
+              COUNTER=0
+              while [ $COUNTER -le 99 ] ; do
+                check_remote_dir "$LIVE_MIRROR_DEBIAN/cdimage$NONFREE_SUBDIR/$DEBIAN_ISO_SUBDIR$VERSION.$COUNTER-live$NONFREE_SUFFIX"
+                if [ $? -eq 0 ] ; then
+                  PATCHLEVEL_FOUND=1
+                  DEBIAN_ISO_PATCHLEVEL=".$COUNTER"
+                else
+                  [ $PATCHLEVEL_FOUND -eq 1 ] && break
+                fi
+                COUNTER=$((COUNTER+1))
+              done
+              if [ $PATCHLEVEL_FOUND -eq 1 ] ; then
+                if [ "$DEBIAN_VER_MAJ" -eq 7 ] ; then
+                  DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_7"
+                elif [ "$DEBIAN_VER_MAJ" -eq 8 ] ; then
+                  DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_8"
+                else
+                  DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_9"
+                fi
+              fi
+            fi
+
+            print_debug_var "DEBIAN_ISO_SUBDIR" "PATCHLEVEL_FOUND" "DEBIAN_ISO_PATCHLEVEL"
+            ;;
+
+          ubuntu)
+            if [ "$SUITE" = "devel" ] ; then
+              print_verbose "Live images not supported for $DISTRIB $SUITE, skipping ISO processing."
+            elif [ "$ARCH" = "i386" ] && ( ( [ $UBUNTU_VER_MAJ -eq 17 ] && [ $UBUNTU_VER_MIN -eq 10 ] ) || [ $UBUNTU_VER_MAJ -ge 18 ] ) ; then
+              print_verbose "$DISTRIB_FULL stopped releasing live Desktop images on $ARCH architecture since 17.10, skipping ISO processing."
+            else
+              DESKTOP_LIST="$LIVE_DESKTOP_LIST_UBUNTU"
+            fi
+            ;;
+
+          mint)
+            if [ "$SUITE" = "LMDE" ] ; then
+              DESKTOP_LIST="$LIVE_DESKTOP_LIST_LMDE"
+            else
+              DESKTOP_LIST="$LIVE_DESKTOP_LIST_MINT"
+            fi
+            case "$ARCH" in
+              i386)
+                MINT_ARCH="32bit" ;;
+              amd64)
+                MINT_ARCH="64bit" ;;
+              *)
+                abort_loop "unsupported achitecture for Linux Mint" ;;
+            esac
+            print_debug_var "MINT_ARCH"
+            ;;
+
+        esac
+
+        print_debug_var "DESKTOP_LIST"
+
+        delete_files "$CODENAME_LIVE_MENU_FILE"
+
+        # Loop through available desktops for this architecture
+        for DESKTOP in $DESKTOP_LIST ; do
+
+          print_debug_var "DESKTOP"
+
+          case "$DISTRIB" in
+
+            debian)
+              LATEST_ISO_FILE="$DISTRIB-live-$VERSION$DEBIAN_ISO_PATCHLEVEL-$ARCH-$DESKTOP$NONFREE_SUFFIX.iso"
+              LATEST_ISO_URL="$LIVE_MIRROR_DEBIAN/cdimage$NONFREE_SUBDIR/$DEBIAN_ISO_SUBDIR$VERSION$DEBIAN_ISO_PATCHLEVEL-live$NONFREE_SUFFIX/$ARCH/iso-hybrid/$LATEST_ISO_FILE"
+              BOOT_METHOD="live"
+              if [ "$DEBIAN_VER_MAJ" -ge 8 ] ; then
+                APPEND_OPTIONS="components"
+              else
+                APPEND_OPTIONS="config"
+              fi
+              ;;
+
+            ubuntu)
+              LATEST_ISO_FILE="$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-desktop-$ARCH.iso"
+              LATEST_ISO_URL="$LIVE_MIRROR_UBUNTU/$CODENAME/$LATEST_ISO_FILE"
+              BOOT_METHOD="casper"
+              APPEND_OPTIONS=""
+              ;;
+
+            mint)
+              if [ "$SUITE" = "LMDE" ] ; then
+                LATEST_ISO_FILE="lmde-2-201503-$DESKTOP-$MINT_ARCH.iso"
+                LATEST_ISO_URL="$LIVE_MIRROR_MINT/debian/$LATEST_ISO_FILE"
+                BOOT_METHOD="live"
+                APPEND_OPTIONS="config"
+              else
+                [ "$MINT_VER_MAJ" -le 16 ] && DVD_SUFFIX="-dvd"
+                LATEST_ISO_FILE="linux$DISTRIB-$VERSION-$DESKTOP$DVD_SUFFIX-$MINT_ARCH.iso"
+                LATEST_ISO_URL="$LIVE_MIRROR_MINT/stable/$VERSION/$LATEST_ISO_FILE"
+                BOOT_METHOD="casper"
+                APPEND_OPTIONS=""
+              fi
+              ;;
+
+          esac
+
+          print_debug_var "LATEST_ISO_FILE" "LATEST_ISO_URL" "BOOT_METHOD" "APPEND_OPTIONS"
+
+          # If the latest ISO is found, use it, else we hint a download URL
+          if [ -f "$LIVE_ISO_DIR/$LATEST_ISO_FILE" ] ; then
+            ISO_FILE=$LIVE_ISO_DIR/$LATEST_ISO_FILE
+            print_verbose "Latest Live CD image found: $ISO_FILE"
+          else
+            ISO_FILE=""
+            print_verbose "No Live CD image found for $DISTRIB $CODENAME $VERSION $DESKTOP $ARCH"
+            if [ $LIVE_URL_SUGGEST -eq 1 ] ; then
+              print_verbose "Please download $LATEST_ISO_URL to $LIVE_ISO_DIR"
+              if [ $VERBOSE -eq 0 ] ; then
+                if [ $LIVE_URL_SUGGEST_HEADER_DISPLAYED -eq 0 ] ; then
+                  printf "Please download to %s:\n" "$LIVE_ISO_DIR"
+                  LIVE_URL_SUGGEST_HEADER_DISPLAYED=1
+                fi
+                echo "$LATEST_ISO_URL"
+              fi
+            fi
+          fi
+
+          print_debug_var "ISO_FILE"
+
+          LIVE_CONTENTS_WORKDIR="$LIVE_TFTP_DIR/$DISTRIB/$CODENAME/$ARCH/$DESKTOP"
+          print_debug_var "LIVE_CONTENTS_WORKDIR"
+
+          # If the latest ISO was found earlier, sync its contents
+          if [ -n "$ISO_FILE" ] ; then
+            if [ -n "$FUSEISO_BIN" ] ; then
+              print_verbose "Processing Live CD image: $DESKTOP"
+              ISO_MOUNT_DIR="/tmp/$(basename $ISO_FILE)"
+              print_debug_var "ISO_MOUNT_DIR"
+              print_verbose "Mounting ISO file $ISO_FILE on directory $ISO_MOUNT_DIR"
+              $FUSEISO_BIN -p "$ISO_FILE" "$ISO_MOUNT_DIR"
+              [ -d "$LIVE_CONTENTS_WORKDIR" ] || mkdir -p "$LIVE_CONTENTS_WORKDIR"
+              print_verbose "Extracting contents of ISO image to $LIVE_CONTENTS_WORKDIR"
+              if [ -n "$RSYNC_BIN" ] ; then
+                $RSYNC_BIN --archive --delete "$ISO_MOUNT_DIR/" "$LIVE_CONTENTS_WORKDIR/"
+              else
+                cp -af "$ISO_MOUNT_DIR/"* "$LIVE_CONTENTS_WORKDIR"
+              fi
+              print_verbose "Changing files and directories permissions"
+              find -H "$LIVE_CONTENTS_WORKDIR" -type d -exec chmod 755 '{}' \;
+              find -H "$LIVE_CONTENTS_WORKDIR" -type f -exec chmod 644 '{}' \;
+              print_verbose "Unmounting directory $ISO_MOUNT_DIR"
+              fusermount -u "$ISO_MOUNT_DIR"
+            fi
+          fi
+
+          # Copy kernel and initrd
+          if [ -d "$LIVE_CONTENTS_WORKDIR" ] ; then
+
+            # Warn if ISO was not found earlier
+            [ -z "$ISO_FILE" ] && print_verbose "Using files from $LIVE_CONTENTS_WORKDIR which may be outdated"
+            [ -d "$WORK_DIR/livecd/$DESKTOP" ] || mkdir -p "$WORK_DIR/livecd/$DESKTOP"
+
+            print_verbose "Copying kernel and initial ramdisk to $WORK_DIR/livecd/$DESKTOP"
+
+            KERNEL="$(find -H "$LIVE_CONTENTS_WORKDIR/$BOOT_METHOD" -name "vmlinuz*" | sort | tail -n 1)"
+            print_debug_var "KERNEL"
+            if [ -n "$KERNEL" ] ; then
+              print_verbose "Found kernel $KERNEL"
+              cp -f "$KERNEL" "$WORK_DIR/livecd/$DESKTOP"
+            else
+              print_error "No kernel found"
+            fi
+
+            INITRD="$(find -H "$LIVE_CONTENTS_WORKDIR/$BOOT_METHOD" -name "initrd*" | sort | tail -n 1)"
+            print_debug_var "INITRD"
+            if [ -n "$INITRD" ] ; then
+              print_verbose "Found initial ramdisk $INITRD"
+              cp -f "$INITRD" "$WORK_DIR/livecd/$DESKTOP"
+            else
+              print_error "No initial ramdisk found"
+            fi
+
+            # Live CD menu file starts here
+            if [ ! -e "$CODENAME_LIVE_MENU_FILE" ] ; then
+              print_verbose "Creating $DISTRIB $CODENAME $ARCH Live CD menu file $CODENAME_LIVE_MENU_FILE"
+              printf "%s\n%s\n" \
+                "MENU TITLE Live CD" \
+                "MENU TABMSG Please select a Live CD" \
+                > "$CODENAME_LIVE_MENU_FILE"
+            fi
+
+            # Get desktop full name and localization options
+            DESKTOP_FULL="$(echo "$DESKTOP" | sed -e "s/^./\u&/")"
+            if [ "$BOOT_METHOD" = "live" ] ; then
+              LIVE_LOCALIZATION_OPTIONS="locales=$LIVE_LOCALE keyboard-layouts=$LIVE_KEYBOARD"
+            elif [ "$BOOT_METHOD" = "casper" ] ; then
+              LIVE_LOCALIZATION_OPTIONS="debian-installer/locale=$LIVE_LOCALE console-setup/layoutcode=$LIVE_KEYBOARD"
+            fi
+
+            print_debug_var "DESKTOP_FULL" "LIVE_LOCALIZATION_OPTIONS"
+
+            # Live CD menu file continues here
+            print_verbose "Appending $DISTRIB $CODENAME $ARCH $DESKTOP Live CD entry to menu file $CODENAME_LIVE_MENU_FILE"
+            printf "%s\n\t%s\n\t%s\n\t%s\n" \
+              "LABEL $DISTRIB-$CODENAME-$ARCH-live-$DESKTOP" \
+              "MENU LABEL ^$DESKTOP_FULL" \
+              "KERNEL dists/$DISTRIB/$CODENAME/$ARCH/livecd/$DESKTOP/$(basename "$KERNEL")" \
+              "APPEND root=/dev/nfs boot=$BOOT_METHOD netboot=nfs nfsroot=$LIVE_NFS_SERVER_IP:$LIVE_NFS_SERVER_DIR/$DISTRIB/$CODENAME/$ARCH/$DESKTOP $LIVE_LOCALIZATION_OPTIONS initrd=dists/$DISTRIB/$CODENAME/$ARCH/livecd/$DESKTOP/$(basename "$INITRD") $APPEND_OPTIONS --" \
+              >> "$CODENAME_LIVE_MENU_FILE"
+
+            # Mint doesn't provide netboot installer, so we have to copy the splash screen from ISO contents
+            if [ "$DISTRIB" = "mint" ] ; then
+              print_verbose "Copying Linux Mint splash screen $LIVE_CONTENTS_WORKDIR/isolinux/splash.$SPLASH_EXT to $WORK_DIR/boot-screens"
+              [ ! -d "$WORK_DIR/boot-screens" ] && mkdir -p "$WORK_DIR/boot-screens"
+              cp -af "$LIVE_CONTENTS_WORKDIR/isolinux/splash.$SPLASH_EXT" "$WORK_DIR/boot-screens"
+              print_verbose "Creating $DISTRIB $CODENAME standard menu file $WORK_DIR/boot-screens/stdmenu.cfg"
+              printf "%s\n%s\n" \
+                "MENU BACKGROUND dists/$DISTRIB/$CODENAME/$ARCH/boot-screens/splash.$SPLASH_EXT" \
+                "MENU VSHIFT 6" \
+                > "$CODENAME_ORIG_TXT_MENU_FILE"
+            fi
+
+          fi
+
+        done
+
+        if [ -f "$CODENAME_LIVE_MENU_FILE" ] ; then
+
+          # Live CD menu file ends here
+          print_verbose "Appending exit entry to $DISTRIB $CODENAME $ARCH Live CD menu file $CODENAME_LIVE_MENU_FILE"
+          printf "%s\n" \
+            "INCLUDE boot-screens/back.cfg" \
+            >> "$CODENAME_LIVE_MENU_FILE"
+
+          # Append Live CD menu file to arch menu file
+          print_verbose "Appending Live CD menu file to $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
+          printf "%s\n\t%s\n\t%s\n%s\n" \
+            "MENU BEGIN $DISTRIB-$CODENAME-$ARCH-live" \
+            "MENU LABEL ^Live CD" \
+            "INCLUDE ${CODENAME_LIVE_MENU_FILE#$PXE_ROOT_DIR/}" \
+            "MENU END" \
+            >> "$CODENAME_ORIG_TXT_MENU_FILE"
+
+        fi
+
+      fi
+
+      # Append back menu entry to menu file
+      print_verbose "Appending exit entry to $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
+      printf "%s\n" \
+        "INCLUDE boot-screens/back.cfg" \
+        >> "$CODENAME_ORIG_TXT_MENU_FILE"
+
+    done
+
+    # Release menu file ends here
+    # Calculate the needed rows (number of entries + 2 for Back and its separator) to have a nice border if it's enabled in the theme
+    # Force TABMSG, CMDLINE, TIMEOUT and HELPMSG rows to accomodate VSHIFT, otherwise they may not appear (for example Debian Stretch)
+    ROWS="$(($(grep -c "INCLUDE .*/menu.cfg" $CODENAME_MENU_FILE)+2))"
+    VSHIFT="$(sed "/menu vshift/I!d ; s/[^[:digit:]]//g" "$PXE_ROOT_DIR/$CODENAME_STDMENU_FILE")"
+    print_verbose "Appending exit entry to $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
+    printf "%s\n%s\n%s\n%s\n%s\n%s\n" \
+      "INCLUDE boot-screens/back.cfg" \
+      "MENU ROWS $ROWS"\
+      "MENU TABMSGROW -$((VSHIFT+3))" \
+      "MENU CMDLINEROW -$((VSHIFT+3))" \
+      "MENU TIMEOUTROW -$((VSHIFT+2))" \
+      "MENU HELPMSGROW -$((VSHIFT+1))" \
+      >> "$CODENAME_MENU_FILE"
+
+    # Old format splash screen conversion
+    if ( [ -n "$IDENTIFY_BIN" ] && [ -n "$CONVERT_BIN" ] ) ; then
+      find -H "$PXE_ROOT_DIR/dists/$DISTRIB/$CODENAME" \( -iname "*.png" -o -iname "*.jpg" \) | while read -r SPLASH_FILE ; do
+        print_debug_var "SPLASH_FILE"
+        SPLASH_SIZE="$($IDENTIFY_BIN "$SPLASH_FILE" | cut -d " " -f 3)"
+        print_debug_var "SPLASH_SIZE"
+        if [ "$SPLASH_SIZE" != "640x480" ] ; then
+          print_verbose "Resizing old format splash screen $SPLASH_FILE to 640x480"
+          $CONVERT_BIN "$SPLASH_FILE" -background black -extent 640x480 "${SPLASH_FILE}.new" && mv "${SPLASH_FILE}.new" "$SPLASH_FILE"
+        fi
+      done
+    fi
+
+  fi
+
+  # Suite -> Codename symlink
+  if ( [ -n "$SUITE" ] && [ "$BASE_URL" != "http://archive.debian.org" ] ); then
+    print_verbose "Updating symlink: $SUITE -> $CODENAME"
+    ln -snf "$CODENAME" "$PXE_ROOT_DIR/dists/$DISTRIB/$SUITE"
+  fi
+
+  # Mark distrib:codename as processed
+  echo "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" || PROCESSED_RELEASES_LIST="$PROCESSED_RELEASES_LIST $DISTRIB:$CODENAME"
+  print_debug_var "PROCESSED_RELEASES_LIST"
+
+  # Mark distrib as processed
+  echo "$PROCESSED_DISTRIBS_LIST" | grep -q "$DISTRIB" || PROCESSED_DISTRIBS_LIST="$PROCESSED_DISTRIBS_LIST $DISTRIB"
+  print_debug_var "PROCESSED_DISTRIBS_LIST"
+
+  # If this is the main release, mark it as OK
+  if [ "$RELEASE" = "$RELEASE_MAIN" ] ; then
+    RELEASE_MAIN_OK=1
+    print_debug_var "RELEASE_MAIN_OK"
+  fi
+  
+  print_verbose "Finished processing release: $DISTRIB $CODENAME" 
+
+done
+
+delete_files "$PORTS_FILE"
+
+
+#
+# OLD DISTRIBUTIONS REMOVAL
+#
+
+if [ $REMOVE_OLD -eq 1 ] ; then
+
+  print_verbose "##### Removing old distributions #####"
+
+  for DIR in "$PXE_ROOT_DIR/dists" "$LIVE_TFTP_DIR" ; do
+    [ "$DIR" = "$LIVE_TFTP_DIR" ] && [ $LIVE_ENABLE -eq 0 ] && continue
+    if [ -d "$DIR" ] ; then
+      find -H "$DIR" -mindepth 2 -maxdepth 2 -type d | sort | while read -r CODENAME_DIR ; do
+        print_debug_var "CODENAME_DIR"
+        echo "$PROCESSED_RELEASES_LIST" | grep -q "$(echo "$CODENAME_DIR" | sed -r -e "s#($DIR)/##" -e "s#/#:#")"
+        if [ $? -ne 0 ] ; then
+          print_verbose "Deleting directory $CODENAME_DIR"
+          rm -rf "$CODENAME_DIR"
+          CODENAME_MENU_FILE="$(find -H "$PXE_ROOT_DIR" -name "$(echo "$CODENAME_DIR" | sed -r -e "s#($DIR)/##" -e "s#(.*)/#\1*#").cfg")"
+          print_debug_var "CODENAME_MENU_FILE"
+          if [ -n "$CODENAME_MENU_FILE" ] ; then
+            print_verbose "Deleting menu file $CODENAME_MENU_FILE"
+            delete_files "$CODENAME_MENU_FILE"
+          fi
+        fi
+      done
+    fi
+  done
+
+  find -H "$PXE_ROOT_DIR/dists" -maxdepth 2 -mindepth 2 -type l -xtype l | sort | while read -r DANGLING_LINK ; do
+    print_debug_var "DANGLING_LINK"
+    print_verbose "Removing dangling link $DANGLING_LINK"
+    delete_files "$DANGLING_LINK"
+  done
+
+fi
+
+
+#
+# DISTRIBUTIONS FILES
+#
+
+print_verbose "##### Creating distributions menu files #####"
+
+for DISTRIB in $PROCESSED_DISTRIBS_LIST ; do
+
+  print_debug_var "DISTRIB"
+
+  set_distrib_info
+
+  # Get stdmenu.cfg file from first DISTRIB release
+  for RELEASE in $PROCESSED_RELEASES_LIST ; do
+    if [ "${RELEASE%:*}" = "$DISTRIB" ] ; then
+      STDMENU_FILE="dists/$DISTRIB/${RELEASE#*:}/$ARCH_MAIN/boot-screens/stdmenu.cfg"
+      break
+    fi
+  done
+
+  DISTRIB_MENU_FILE="$BOOT_SCREENS_DIR/${DISTRIB}.cfg"
+  MARGIN="$(((80-($(find -H "$BOOT_SCREENS_DIR" -type f -name "${DISTRIB}-*.cfg" -exec grep 'MENU TITLE' '{}' + | sed -e 's/^.*MENU TITLE //' | wc -L)+8))/2))"
+
+  print_debug_var "STDMENU_FILE" "DISTRIB_MENU_FILE" "MARGIN"
+
+  # Distribution menu file starts here
+  print_verbose "Creating $DISTRIB_FULL menu file $DISTRIB_MENU_FILE"
+  printf "%s\n%s\n%s\n%s\n" \
+    "MENU LABEL ^$DISTRIB_FULL" \
+    "MENU TITLE $DISTRIB_FULL" \
+    "MENU MARGIN $MARGIN" \
+    "INCLUDE $STDMENU_FILE" \
+    > "$DISTRIB_MENU_FILE"
+
+  # Distribution menu file continues here
+  find -H "$BOOT_SCREENS_DIR" -name "$DISTRIB-*.cfg" | sort -rV | while read -r CODENAME_MENU_FILE_INCLUDE ; do
+    CODENAME_MENU_FILE_INCLUDE="$(basename "$CODENAME_MENU_FILE_INCLUDE")"
+    print_debug_var "CODENAME_MENU_FILE_INCLUDE"
+    print_verbose "Including $CODENAME_MENU_FILE_INCLUDE in $DISTRIB_MENU_FILE"
+    printf "%s\n" \
+      "INCLUDE boot-screens/$CODENAME_MENU_FILE_INCLUDE $(basename "$CODENAME_MENU_FILE_INCLUDE" .cfg)" \
+      >> "$DISTRIB_MENU_FILE"
+  done
+
+  # Distribution menu file ends here
+  # Calculate the needed rows (number of entries + 2 for Back and its separator) to have a nice border if it's enabled in the theme
+  # Force TABMSG, CMDLINE, TIMEOUT and HELPMSG rows to accomodate VSHIFT, otherwise they may not appear (for example Debian Stretch)
+  ROWS="$(($(grep -c "INCLUDE boot-screens/$DISTRIB" $DISTRIB_MENU_FILE)+2))"
+  VSHIFT="$(sed "/menu vshift/I!d ; s/[^[:digit:]]//g" "$PXE_ROOT_DIR/$STDMENU_FILE")"
+  printf "%s\n%s\n%s\n%s\n%s\n%s\n%s\n" \
+    "INCLUDE boot-screens/back.cfg" \
+    "MENU TABMSG Please select a release of $DISTRIB_FULL" \
+    "MENU ROWS $ROWS"\
+    "MENU TABMSGROW -$((VSHIFT+3))" \
+    "MENU CMDLINEROW -$((VSHIFT+3))" \
+    "MENU TIMEOUTROW -$((VSHIFT+2))" \
+    "MENU HELPMSGROW -$((VSHIFT+1))" \
+    >> "$DISTRIB_MENU_FILE"
+
+done
+
+
+#
+# ROOT PXE FILES
+#
+
+print_verbose "##### Creating root PXELINUX files #####"
+
+# Default config
+print_verbose "Creating PXELINUX default configuration file $PXE_CONFIG_DEFAULT"
+printf "%s\n%s\n%s\n%s\n%s\n" \
+  "SERIAL 0" \
+  "PATH boot-screens" \
+  "INCLUDE boot-screens/menu.cfg" \
+  "DEFAULT boot-screens/vesamenu.c32" \
+  "PROMPT 0" \
+  > "$PXE_CONFIG_DEFAULT"
+
+# Main menu
+print_verbose "Creating PXELINUX main menu file $PXE_MAIN_MENU"
+printf "%s\n" \
+  "MENU TITLE ${PXE_BANNER:-PXE server}" \
+  > "$PXE_MAIN_MENU"
+
+# Theme
+if [ -n "$PXE_THEME" ] ; then
+
+  FOUND_PXE_THEME=0
+  print_debug_var "FOUND_PXE_THEME"
+
+  for PXE_THEME_DIR in "$USER_DATA_DIR/themes" "$SYSTEM_DATA_DIR/themes" ; do
+    print_debug_var "PXE_THEME_DIR"
+    if [ -f "$PXE_THEME_DIR/$PXE_THEME/stdmenu.cfg" ] ; then
+      print_verbose "Theme \"$PXE_THEME\" found in $PXE_THEME_DIR"
+      FOUND_PXE_THEME=1
+      PXE_THEME_DIR="$PXE_THEME_DIR/$PXE_THEME"
+      print_debug_var "FOUND_PXE_THEME" "PXE_THEME_DIR"
+      break
+    fi
+  done
+
+  if [ $FOUND_PXE_THEME -eq 1 ] ; then
+
+    # Copy theme file
+    PXE_THEME_FILE="$PXE_THEME_DIR/stdmenu.cfg"
+    print_verbose "Copying theme file $PXE_THEME_FILE to $BOOT_SCREENS_DIR"
+    cp -f "$PXE_THEME_FILE" "$BOOT_SCREENS_DIR"
+
+    # Copy splash screen
+    PXE_THEME_SPLASH="$PXE_THEME_DIR/$(sed -E "/BACKGROUND/!d ; s,^.*/,," "$PXE_THEME_FILE")"
+    if [ -f "$PXE_THEME_SPLASH" ] ; then
+      print_verbose "Copying splash file $PXE_THEME_SPLASH to $BOOT_SCREENS_DIR"
+      cp -f "$PXE_THEME_SPLASH" "$BOOT_SCREENS_DIR"
+    fi
+
+    print_verbose "Including theme file stdmenu.cfg in $PXE_MAIN_MENU"
+    printf "%s\n" \
+      "INCLUDE boot-screens/stdmenu.cfg" \
+      >> "$PXE_MAIN_MENU"
+    PXE_THEME_FILE="$BOOT_SCREENS_DIR/stdmenu.cfg"
+    print_debug_var "PXE_THEME_FILE"
+
+  else
+    print_error "Theme \"$PXE_THEME\" not found"
+  fi
+
+fi
+
+# Distributions files
+for DISTRIB in $PROCESSED_DISTRIBS_LIST ; do
+  print_debug_var "DISTRIB"
+  if [ -f "$BOOT_SCREENS_DIR/${DISTRIB}.cfg" ] ; then
+    print_verbose "Including distribution file ${DISTRIB}.cfg in $PXE_MAIN_MENU"
+    printf "%s\n" \
+      "INCLUDE boot-screens/${DISTRIB}.cfg $DISTRIB" \
+      >> "$PXE_MAIN_MENU"
+  fi
+done
+
+# Custom files
+for CUSTOM_DIR in "$USER_CUSTOM_DIR" "$SYSTEM_CUSTOM_DIR" ; do
+  print_debug_var "CUSTOM_DIR"
+  if [ -d "$CUSTOM_DIR" ] ; then
+    find -H "$CUSTOM_DIR" -mindepth 1 -maxdepth 1 -name "*.cfg" | sort -n | while read -r CUSTOM_FILE ; do
+      print_debug_var "CUSTOM_FILE"
+      if [ ! -e "$BOOT_SCREENS_DIR/$(basename "$CUSTOM_FILE")" ] ; then
+        print_verbose "Copying custom file $CUSTOM_FILE to $BOOT_SCREENS_DIR"
+        cp -f "$CUSTOM_FILE" "$BOOT_SCREENS_DIR"
+        CUSTOM_FILE="$(basename "$CUSTOM_FILE")"
+        print_debug_var "CUSTOM_FILE"
+        print_verbose "Including custom file $CUSTOM_FILE in $PXE_MAIN_MENU"
+        printf "%s\n" \
+          "INCLUDE boot-screens/$CUSTOM_FILE" \
+          >> "$PXE_MAIN_MENU"
+      else
+        print_verbose "Ignoring custom file $CUSTOM_FILE (already exists)"
+      fi
+    done
+  fi
+done
+
+# If margin isn't forced in the theme file, calculate a suitable one
+PXE_THEME_FILE="$BOOT_SCREENS_DIR/stdmenu.cfg"
+print_debug_var "PXE_THEME_FILE"
+if ( [ -f "$PXE_THEME_FILE" ] && ! grep -q "^[^#]*MENU MARGIN" "$PXE_THEME_FILE" ) ; then
+  print_verbose "Adding automatic margin to $PXE_THEME_FILE"
+  printf "%s\n" "MENU MARGIN $(((80-($(find -H "$BOOT_SCREENS_DIR" \( -name menu.cfg $(for INCLUDE_FILE in $(grep INCLUDE $PXE_MAIN_MENU | sed -e "s;^.*/;;") ; do printf "%s" "-o -name $INCLUDE_FILE " ; done) \) -exec grep 'MENU TITLE' '{}' + | sed -e 's/^.*MENU TITLE //' | wc -L)+8))/2))" >> "$PXE_THEME_FILE"
+fi
+
+# Exit menu (back)
+EXIT_FILE="$BOOT_SCREENS_DIR/back.cfg"
+if [ ! -e "$EXIT_FILE" ] ; then
+  print_verbose "Creating exit menu file $EXIT_FILE"
+  # Formula to obtain padding for centered text: ( 78 - length ) / 2 + length
+  printf "%s\n%s\n\t%s\n\t%s\n%50s\n\t%s\n\t%s\n" \
+    "MENU SEPARATOR" \
+    "LABEL back" \
+    "MENU LABEL ^Back" \
+    "TEXT HELP" \
+    "Return to previous menu" \
+    "ENDTEXT" \
+    "MENU EXIT" \
+    > "$EXIT_FILE"
+else
+  print_verbose "Not creating file $EXIT_FILE (already exists)"
+fi
+
+# Keyboard map
+PXELINUX_KEYMAP="${PXE_KEYMAP}.ktl"
+for KEYMAP_DIR in "$USER_CUSTOM_DIR" "$SYSTEM_CUSTOM_DIR" ; do
+  print_debug_var "KEYMAP_DIR"
+  if [ -f "$KEYMAP_DIR/$PXELINUX_KEYMAP" ] ; then
+    print_verbose "Copying PXELINUX keyboard map file $KEYMAP_DIR/$PXELINUX_KEYMAP to $BOOT_SCREENS_DIR/keymap.ktl"
+    cp -f "$KEYMAP_DIR/$PXELINUX_KEYMAP" "$BOOT_SCREENS_DIR/keymap.ktl"
+    print_verbose "Adding keyboard map configuration to file $PXE_CONFIG_DEFAULT"
+    printf "%s\n" \
+      "kbdmap boot-screens/keymap.ktl" \
+      >> "$PXE_CONFIG_DEFAULT"
+    break
+  fi
+done
+
+
+#
+# Link needed files from main release
+#
+
+if [ $RELEASE_MAIN_OK -eq 1 ] ; then
+
+  print_verbose "##### Linking root PXELINUX files from main release #####"
+
+  RELEASE_MAIN_DIR="dists/$(echo "$RELEASE_MAIN" | tr ':' '/')/$ARCH_MAIN"
+  print_debug_var "RELEASE_MAIN_DIR"
+
+  # Boot file
+  print_verbose "Creating symlink to boot file $RELEASE_MAIN_DIR/pxelinux.0 in $PXE_ROOT_DIR"
+  ln -sf "$RELEASE_MAIN_DIR/pxelinux.0" "$PXE_ROOT_DIR"
+
+  # C32 files
+  find -H "$PXE_ROOT_DIR/$RELEASE_MAIN_DIR/boot-screens" -mindepth 1 -maxdepth 1 -name "*.c32" | sort | while read -r C32_FILE ; do
+    print_debug_var "C32_FILE"
+    C32_FILE="$(basename "$C32_FILE")"
+    print_debug_var "C32_FILE"
+    if [ "$C32_FILE" = "ldlinux.c32" ] ; then
+      print_verbose "Creating symlink to file $RELEASE_MAIN_DIR/boot-screens/$C32_FILE in $PXE_ROOT_DIR"
+      ln -sf "$RELEASE_MAIN_DIR/boot-screens/$C32_FILE" "$PXE_ROOT_DIR"
+    fi
+    print_verbose "Creating symlink to file ../$RELEASE_MAIN_DIR/boot-screens/$C32_FILE in $BOOT_SCREENS_DIR"
+    ln -sf "../$RELEASE_MAIN_DIR/boot-screens/$C32_FILE" "$BOOT_SCREENS_DIR"
+  done
+
+
+  #
+  # UEFI Support (beta)
+  #
+
+  print_debug_var "DISTRO_MAIN"
+  if [ "$DISTRO_MAIN" = "debian" ] ; then
+
+    print_verbose "##### Linking root UEFI files from main release #####"
+
+    RELEASE_MAIN_DIR="${RELEASE_MAIN_DIR%/*}"
+    print_debug_var "RELEASE_MAIN_DIR"
+
+    # Link EFI files
+    for EFI_BOOT_FILE in $(find -H "$PXE_ROOT_DIR/$RELEASE_MAIN_DIR" -maxdepth 2 -type f -name "bootnet*") ; do
+      print_debug_var "EFI_BOOT_FILE"
+      print_verbose "Creating symlink to EFI file ${EFI_BOOT_FILE#$PXE_ROOT_DIR/} in $PXE_ROOT_DIR"
+      ln -sf "${EFI_BOOT_FILE#$PXE_ROOT_DIR/}" "$PXE_ROOT_DIR"
+    done
+
+    # Link main distro directory to "debian-installer" (hard-coded path in Debian EFI files)
+    print_verbose "Creating symlink to directory $RELEASE_MAIN_DIR in $PXE_ROOT_DIR/debian-installer (hard-coded path in Debian EFI files)"
+    ln -sfn "$RELEASE_MAIN_DIR" "$PXE_ROOT_DIR/debian-installer"
+
+    # Copy GRUB keyboard map
+    GRUB_KEYMAP="${PXE_KEYMAP}.gkb"
+    for KEYMAP_DIR in "$USER_CUSTOM_DIR" "$SYSTEM_CUSTOM_DIR" ; do
+      print_debug_var "KEYMAP_DIR"
+      if [ -f "$KEYMAP_DIR/$GRUB_KEYMAP" ] ; then
+        print_verbose "Copying GRUB keyboard map file $KEYMAP_DIR/$GRUB_KEYMAP to $BOOT_SCREENS_DIR/keymap.gkb"
+        cp -f "$KEYMAP_DIR/$GRUB_KEYMAP" "$BOOT_SCREENS_DIR/keymap.gkb"
+        for GRUB_CONFIG_FILE in $(find -H "$PXE_ROOT_DIR/$RELEASE_MAIN_DIR" -maxdepth 3 -type f -name "grub.cfg") ; do
+          print_debug_var "GRUB_CONFIG_FILE"
+          print_verbose "Adding keyborad map configuration to file $GRUB_CONFIG_FILE"
+          printf "%s\n%s\n%s\n%s\n" \
+            "insmod keylayouts" \
+            "insmod at_keyboard" \
+            "terminal_input at_keyboard" \
+            "keymap /boot-screens/keymap.gkb" \
+            >> "$GRUB_CONFIG_FILE"
+        done
+        break
+      fi
+    done
+
+  fi
+
+fi
+
+
+#
+# SCRIPT END
+#
+
+print_verbose "##### All done #####"

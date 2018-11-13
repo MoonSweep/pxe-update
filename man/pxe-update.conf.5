@@ -1,0 +1,235 @@
+.\" (C) Copyright 2018 Raphaël Halimi <raphael.halimi@gmail.com>
+
+.TH TFTP-UPDATE.CONF 5 "2018-10-10"
+
+.SH NAME
+pxe-update.conf \- \fBpxe-update\fR configuration file
+
+.SH SYNOPSIS
+.TP
+.B /usr/local/etc/pxe-update/pxe-update.conf
+System-wide configuration file.
+
+.TP
+.B $XDG_CONFIG_HOME/pxe-update/pxe-update.conf
+Per-user configuration file.
+
+.SH DESCRIPTION
+The \fIpxe-update.conf\fR configuration files are sourced by the
+\fBpxe-update\fR shell script to override built-in defaults.
+.PP
+The system-wide configuration file overrides the script defaults; the per-user
+configuration file overrides the system-wide configuration file; and finally,
+the command-line options override the per-user configuration file.
+
+.SH VARIABLES
+The following variables are used in the script:
+
+.SS NETBOOT OPTIONS
+This subsection describes configuration options used for the netboot images
+handling, which is the primary feature of the script.
+
+.TP
+.B PXE_HOME
+The directory where the PXE boot files will be downloaded to. Default is
+"\fB/srv/tftp\fR".
+
+.TP
+.B RELEASES_LIST
+Space-separated list of releases to download. Default is "\fBdebian:stable\fR".
+
+.TP
+.B ARCH_LIST
+Space-separated list of architectures to download. Default is "\fBi386
+amd64\fR".
+
+.TP
+.B MIRROR_DEBIAN
+The Debian mirror to use. Default is "\fBhttp://ftp.debian.org\fR".
+
+.TP
+.B MIRROR_UBUNTU
+The Ubuntu mirror to use. Default is "\fBhttp://archive.ubuntu.com\fR".
+
+.TP
+.B MIRROR_MINT
+The Mint mirror to use. Default is "\fBhttp://packages.linuxmint.com\fR".
+
+.TP
+.B NO_VGA
+This will remove the "vga=..." boot option from all entries, which is useful if
+your PXE server is mainly used to provision virtual machines with virt-install.
+Anything other than 1 will be considered as 0. Default is \fB0\fR (disabled).
+
+.TP
+.B PRESEED_URL
+Preseed server URL. This will add a "url=..." boot parameter to "Automated
+install" entries. Set it to the URL of the server which holds your
+debian-installer preseed files, for example, "\fBtftp://autoserver\fR". See
+\fBhttps://www.debian.org/releases/stable/amd64/apbs02.html\fR for more
+information. Default is empty.
+
+.TP
+.B ADD_BOOT_OPTIONS
+Additional boot options. This will add boot options at the end of all entries.
+For example, if your TFTP server only serves virtual machines, you can add
+"\fBelevator=noop\fR". Default is empty.
+
+.SS LIVE CD OPTIONS
+This subsection describes configuration options used for the Live CD images
+handling. Unlike netboot images, Live CD images are not automatically downloaded
+from Internet, and must be provided by the user beforehand.
+
+.P
+If you want to use Live CD images, set both \fBLIVE_ENABLE\fR and
+\fBLIVE_URL_SUGGEST\fR to \fB1\fR (see below), and run the script normally. If
+it finds ISO images available online for the requested releases, it will
+suggest URLs to download them.
+
+.TP
+.B LIVE_ENABLE
+Set to \fB1\fR to enable Live CD boot. Please note that, since Linux Mint
+doesn't provide netboot images, you have to enable this option if you specified
+any Linux Mint release. Anything other than 1 will be considered as 0. Default
+is \fB0\fR (disabled).
+
+.TP
+.B LIVE_URL_SUGGEST
+Set to \fB1\fR to suggest Live CD images URLs to download. Anything other than
+1 will be considered as 0. Default is \fB0\fR (disabled).
+
+.TP
+.B ISO_DIR
+The directory containing the provided ISO images. Default is
+"\fB/mnt/nfs/iso\fR".
+
+.TP
+.B LIVE_DIR
+The directory where to copy ISO images contents. A PXE server cannot boot
+directly from an ISO image, so the script will extract the kernel and initial
+ramdisk from the ISO image to a subdirectory of \fBPXE_HOME\fR, and copy the
+remaining files to this directory, which must be available to clients via NFS.
+It must be locally accessible to the host running the script, so if it's on a
+remote NFS server, it must be mounted \fBbefore\fR the script is run.
+Default is "\fB/mnt/nfs/tftp\fR".
+
+.TP
+.B NFS_SERVER_IP
+The IP address of the NFS server where the bootp clients can boot Live CDs from,
+in other words, the NFS server which holds \fBLIVE_DIR\fR. Default is
+"\fB192.168.0.1\fR".
+
+.TP
+.B NFS_SERVER_LIVE_DIR
+The directory on the NFS server where the bootp clients can boot Live CDs from,
+as seen by the NFS clients. If your NFS server is located on the same host as
+the TFTP server, this will be identical to \fBLIVE_DIR\fR. Default is
+"\fB/tftp\fR".
+
+.TP
+.B LIVE_LOCALE
+The locale to be used for Live CD boot. Default is "\fBen_US.UTF-8\fR".
+
+.TP
+.B LIVE_KEYBOARD
+The keyboard mapping to be used for Live CD boot. Default is "\fBus\fR".
+
+.TP
+.B LIVE_NONFREE
+If you prefer to use non-free Live CD images for Debian, set it to \fB1\fR.
+Anything other than 1 will be considered as 0. Default is \fB0\fR (disabled).
+
+.TP
+.B LIVE_MIRROR_DEBIAN
+The Debian Live mirror to use. Default is "\fBhttp://cdimage.debian.org\fR".
+
+.TP
+.B LIVE_MIRROR_UBUNTU
+The Ubuntu releases mirrror to use. Default is
+"\fBhttp://releases.ubuntu.com\fR".
+
+.TP
+.B LIVE_MIRROR_MINT
+The Mint releases mirror to use. Default is
+"\fBhttp://mirrors.kernel.org/linuxmint\fR".
+
+.TP
+.B LIVE_DESKTOP_LIST_DEBIAN_7
+Space-separated list of Debian Live CD variants to use for wheezy. Default is
+"\fBstandard rescue gnome-desktop kde-desktop xfce-desktop lxde-desktop\fR".
+
+.TP
+.B LIVE_DESKTOP_LIST_DEBIAN_8
+Space-separated list of Debian Live CD variants to use for Jessie.
+Default is "\fBstandard gnome-desktop kde-desktop xfce-desktop lxde-desktop
+mate-desktop cinnamon-desktop\fR".
+
+.TP
+.B LIVE_DESKTOP_LIST_DEBIAN_9
+Space-separated list of Debian Live CD variants to use for Stretch and up.
+Default is "\fBgnome kde xfce lxde mate cinnamon\fR".
+
+.TP
+.B LIVE_DESKTOP_LIST_UBUNTU
+Space-separated list of Ubuntu Live CD variants to use. Ubuntu only releases one
+Live CD variant, which is \fBdesktop\fR (\fBserver\fR and \fBalternate\fR CDs
+are not Live CDs), but the setting is still a variable in the script not to add
+yet another distribution-specific quirk. Default is "\fBdesktop\fR" (and should
+not be changed).
+
+.TP
+.B LIVE_DESKTOP_LIST_MINT
+Space-separated list of Mint Live CD variants to use. Default is "\fBcinnamon
+mate kde xfce\fR".
+
+.TP
+.B LIVE_DESKTOP_LIST_LMDE
+Space-separated list of Mint LMDE Live CD variants to use. Default is
+"\fBcinnamon mate\fR".
+
+.SS MISCELLANEOUS OPTIONS
+This subsection describes configuration options which do not fit in the above
+sections, and which are mostly related to the PXE server general settings.
+
+.TP
+.B PXE_KEYMAP
+The keymap file to use on the PXE server \fB(without extension)\fR for both
+\fBPXELINUX\fR and \fBGRUB\fR. See the \fBpxe-update\fR(1) for more information
+on how to create keymap files. Keymap files must be placed in the
+\fBboot-screens.d\fR subdirectory of the system-wide or per-user configuration
+directories. Default is empty.
+
+.TP
+.B PXE_THEME
+The graphical theme to use on the PXE server. A theme called "\fBdefault\fR" is
+normally provided with the script. A theme basically consists of a file named
+\fBstdmenu.cfg\fR, and optionally a splash screen. See the \fBSYSLINUX\fR
+documentation for more information on how to create a graphical theme. They
+must be placed in the \fBthemes\fR subdirectory of the system-wide or per-user
+data directories. Default is "\fBdefault\fR".
+
+.TP
+.B PXE_BANNER
+The banner text to use on the PXE server root menu. If empty, it will be
+replaced by the string "PXE server". Default is empty.
+
+.TP
+.B REMOVE_OLD
+Set to \fB1\fR to remove any previously downloaded releases that were not
+requested with the current instance of the script. This is useful to control
+the disk space used by the \fBPXE_HOME\fR and \fBLIVE_DIR\fR directories.
+Anything other than 1 will be considered as 0. Default is \fB0\fR (disabled).
+
+.TP
+.B VERBOSE
+Set to \fB1\fR to enable verbose mode. Anything other than 1 will be
+considered as 0. Default is \fB0\fR (disabled).
+
+.TP
+.B DEBUG
+Set to \fB1\fR to enable debug mode. Anything other than 1 will be considered
+as 0. Default is \fB0\fR (disabled).
+
+.SH SEE ALSO
+.BR pxe-update (1),
+.BR \fBhttps://www.syslinux.org\fR.

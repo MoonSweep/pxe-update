@@ -1,0 +1,266 @@
+.\" (C) Copyright 2018 Raphaël Halimi <raphael.halimi@gmail.com>
+
+.TH TFTP-UPDATE 1 "2018-10-10"
+
+.SH NAME
+pxe-update \- automate maintenance of a pxe server
+
+.SH SYNOPSIS
+.B pxe-update
+.RI [ OPTION ]...
+.RI [ DISTRIBUTION : CODENAME|SUITE ]...
+
+.SH DESCRIPTION
+\fBpxe-update\fR is a shell script to automate maintenance of a PXE server.
+It's meant to be run via a daily cron job.
+
+.P
+Basically, it downloads netboot images of Debian-based distributions to the
+configured TFTP directory (typically \fB/srv/tftp\fR), and builds PXE menu files
+to present the available releases in a nice nested menu. However, advanced
+configuration allows one to do more, like:
+
+.PD 0
+.IP "\(bu"
+BIOS or UEFI boot
+.IP "\(bu"
+Live CD boot via NFS
+.IP "\(bu"
+Customizable keymap
+.IP "\(bu"
+Customizable graphical theme
+.PD
+
+.P
+See the \fBpxe-update\.conf\fR(5) manpage for all supported features.
+
+.SH OPTIONS
+Options must be specified before arguments.
+
+.P
+There are very few options, because most of the configuration is done through
+the configuration file(s). See the \fBpxe-update\.conf\fR(5) manpage for
+details.
+
+.TP
+.BI -r
+Remove unrequested distributions.
+
+.TP
+.BI -v
+Enable verbose mode.
+
+.TP
+.BI -d
+Enable debug mode.
+
+.TP
+.BI -h
+Show summary of options.
+
+.SH ARGUMENTS
+Each argument is a release to download. A release takes the form of a
+\fIDISTRIBUTION\fR, followed by a colon, followed by a \fICODENAME\fR or a
+\fISUITE\fR.
+
+.P
+Requested releases can also be set in the configuration file(s), but arguments
+provided to the script have precedence.
+
+.TP
+.I DISTRIBUTION
+One of the supported distributions (see the \fBSUPPORTED DISTRIBUTIONS\fR
+section below).
+
+.TP
+.I CODENAME
+Any valid release codename that can be fetched from http://ftp.debian.org (or
+http://archive.debian.org for older releases), http://archive.ubuntu.com or
+http://packages.linuxmint.org, like \fBwheezy\fR, \fBraring\fR or \fBsarah\fR.
+
+.TP
+.I SUITE
+A suite name like \fBstable\fR or \fBdevel\fR. Actually, only Debian uses suite
+names, but the script uses some hacks to also assign suite names to Ubuntu and
+Mint releases. Valid suite names are:
+
+.PD 0
+.IP
+For Debian: \fBstable\fR, \fBtesting\fR, \fBunstable\fR, \fBoldstable\fR and
+\fBoldoldstable\fR.
+.IP
+For Ubuntu: \fBstable\fR, \fBdevel\fR (or \fBunstable\fR), \fBoldstable\fR,
+\fBlts\fR and \fBoldlts\fR.
+.IP
+For Mint: \fBstable\fR and \fBlmde\fR.
+.PD
+
+.SH SUPPORTED DISTRIBUTIONS
+\fBpxe-update\fR currently supports \fBDebian\fR, \fBUbuntu\fR and \fBMint\fR.
+
+.P
+For \fBDebian\fR and \fBUbuntu\fR, the script will automatically download
+netboot images, and it can optionally use Live CD boot images provided
+beforehand by the user.
+
+.P
+For \fBMint\fR, since this project doesn't release netboot images,
+only Live CD boot images are supported.
+
+.SH FILES
+
+.TP
+.B /usr/local/etc/pxe-update/pxe-update.conf
+System-wide configuration file.
+
+.TP
+.B /usr/local/etc/pxe-update/boot-screens.d
+System-wide directory containing custom PXE configuration files and keymap
+files.
+
+.TP
+.B /usr/local/share/pxe-update
+System-wide data directory.
+
+.TP
+.B /usr/local/share/pxe-update/themes
+System-wide themes directory.
+
+.TP
+.B $XDG_CONFIG_HOME/pxe-update/pxe-update.conf
+Per-user configuration file.
+
+.TP
+.B $XDG_CONFIG_HOME/pxe-update/boot-screens.d
+Per-user directory containing custom PXE configuration files and keymap files.
+
+.TP
+.B $XDG_DATA_HOME/pxe-update
+Per-user data directory.
+
+.TP
+.B $XDG_DATA_HOME/pxe-update/themes
+Per-user themes directory.
+
+.SH CAVEATS
+pxe-update uses the SYSLINUX elements from the "main" release (the first one),
+and since Linux Mint doesn't release netboot images, the first release must be
+\fBdebian\fR or \fBubuntu\fR.
+
+.P
+Be aware that \fBpxe-update\fR downloads \fIa lot\fR from Internet. If you have
+a limited data plan, be \fIvery\fR careful of the amount of data downloaded
+every time the program is run.
+
+.P
+For this very reason, it is a deliberate choice from the author \fBnot to\fR
+automatically download Live CD images, and delegate the responsibilty of
+managing the Live CD repository to the user.
+
+.P
+Also, since all the data is updated every time, even when the files don't
+change, their timestamp is still updated; if you have a snapshot-based backup
+policy, you may want to exclude the whole TFTP directory from your backups
+(since everything can be easily recovered from Internet anyway).
+
+.SH DEPENDENCIES
+\fBpxe-update\fR needs \fBlftp\fR and \fBshell-script-helper\fR. Those are
+hard dependencies, the script can't work without them.
+
+Unless the TFTP directory is intended to be exported to another host (in the
+case of a DMZ for example), you will obviously need a TFTP server like
+\fBtftpd-hpa\fR or \fBatftpd\fR to serve the files to clients.
+
+Additionally, to use the Live CD boot feature, the script needs \fBfuseiso\fR
+(\fInot\fR fuseiso9660). It also uses \fBrsync\fR to avoid copying already
+up-to-date files (without it, the script will use \fBcp\fR, which will blindly
+copy everything).
+
+To process old releases (before Debian Wheezy), the script uses \fBidentify\fR
+and \fBconvert\fR from \fBimagemagick\fR to resize the splash screens (without
+them, the splash screens will look distorted).
+
+.SH UEFI boot
+UEFI boot is still quite rudimentary, but works. It's only available for the
+first release listed, and only if it's a Debian release greater or equal than 8
+(Jessie). If this condition is met, it's automatically enabled, there is nothing
+else to do.
+
+.SH KEYBOARD MAPPING
+To customize the keyboard mapping for BIOS boot (which uses \fBPXELINUX\fR),
+you'll need the \fBkeytab-lilo\fR tool (distributed with \fBLILO\fR), and
+keyboard mappings from \fBconsole-data\fR. Here's an example for a french
+keyboard:
+
+.P
+.nf
+.RS
+keytab-lilo fr > fr.ktl
+.RE
+.fi
+
+.P
+For UEFI boot (which uses \fBGRUB\fR), you'll need the \fBgrub-kbdcomp\fR tool
+(distributed with \fBGRUB\fR), and the keyboard mappings from \fBxkb\fR:
+
+.P
+.nf
+.RS
+grub-kbdcomp -o fr.gkb fr
+.RE
+.fi
+
+.P
+Both tools are normally able to find the source keyboard mappings on their own.
+For more information, please refer to their respective documentation.
+
+.SH DHCP server configuration
+Here are two examples showing how to configure \fBISC DHCP server\fR for PXE
+boot. If you use another DHCP server, please refer to its own documentation.
+
+.P
+If you don't care about UEFI boot, the configuration is very simple and consists
+of two lines (of course, replace 192.168.1.1 by your own TFTP server's IP
+address):
+
+.P
+.nf
+.RS
+# PXE server address
+next-server 192.168.1.1;
+
+# BOOTP file
+filename "pxelinux.0";
+.RE
+.fi
+
+.P
+To enable both BIOS and UEFI boot, the configuration is slightly longer. When
+a client sends a DHCP request, it normally include its architecture type, which
+allows the DHCP server to act on it and send the right filename in the answer.
+Such a configuration can be written like that:
+
+.P
+.nf
+.RS
+# PXE server address
+next-server 192.168.1.1;
+
+# BIOS/UEFI BOOTP files
+option arch code 93 = unsigned integer 16;
+if option arch = 00:00 {
+  filename "pxelinux.0";
+} elsif option arch = 00:06 {
+  filename "bootnetia32.efi";
+} elsif option arch = 00:07 or option arch = 00:09 {
+  filename "bootnetx64.efi";
+}
+.RE
+.fi
+
+.P
+If you need to support other (less common) hardware, please refer to RFC 4578
+for other supported architecture types.
+
+.SH SEE ALSO
+.BR pxe-update.conf (5).

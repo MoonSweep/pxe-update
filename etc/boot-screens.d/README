@@ -1,0 +1,4 @@
+Add your own files ending with the ".cfg" extension. They will be copied in the
+boot-screens directory in your TFTP server, and appended to the main menu. They
+are processed in shell expansion order, thus it's wise to prefix them with
+numbers (eg. 10_custom.cfg, 20_other_custom.cfg, etc etc).
