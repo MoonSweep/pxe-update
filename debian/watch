@@ -1,0 +1,10 @@
+# watch control file for uscan
+# See uscan(1) for format
+
+# Compulsory line, this is a version 4 file
+version=4
+
+# GitHub hosted projects
+opts="filenamemangle=s%(?:.*?)?v?(\d[\d.]*)\.tar\.gz%pxe-update-$1.tar.gz%" \
+   https://github.com/MoonSweep/pxe-update/tags \
+   (?:.*?/)?v?(\d[\d.]*)\.tar\.gz debian

@@ -1,0 +1,11 @@
+#! /bin/sh -e
+
+PXE_UPDATE_USER="pxe-update"
+
+# On purge, remove user
+if [ "$1" = "purge" ]; then
+  printf "Removing user \"%s\" but leaving home directory %s\n" "$PXE_UPDATE_USER" "$(getent passwd "$PXE_UPDATE_USER" | cut -d : -f 6)"
+  deluser --quiet --system "$PXE_UPDATE_USER"
+fi
+
+#DEBHELPER#

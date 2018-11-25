@@ -1,0 +1,12 @@
+#! /bin/sh -e
+
+PXE_UPDATE_USER="pxe-update"
+
+# Create user
+if ! getent passwd "$PXE_UPDATE_USER" > /dev/null 2>&1 ; then
+  adduser --quiet --system --group --home "/var/lib/$PXE_UPDATE_USER" --gecos "PXE update" "$PXE_UPDATE_USER"
+else
+  printf "PXE update user \"%s\" already exists, doing nothing.\n" "$PXE_UPDATE_USER"
+fi
+
+#DEBHELPER#

@@ -1,0 +1,28 @@
+Source: pxe-update
+Section: net
+Priority: optional
+Maintainer: Raphaël Halimi <raphael.halimi@gmail.com>
+Build-Depends: debhelper (>= 11)
+Standards-Version: 4.2.1
+Rules-Requires-Root: no
+Homepage: https://github.com/MoonSweep/pxe-update
+Vcs-Browser: https://github.com/MoonSweep/pxe-update.git
+Vcs-Git: https://github.com/MoonSweep/pxe-update.git
+
+Package: pxe-update
+Architecture: all
+Depends: adduser, lftp, shell-script-helper, ${misc:Depends}
+Recommends: fuseiso, rsync, imagemagick, tftpd-hpa | atftpd
+Description: Automate maintenance of a PXE server
+ pxe-update is a shell script to automate maintenance of a PXE server. It's
+ meant to be run via a daily cron job.
+ .
+ Basically, it downloads netboot images of Debian-based distributions to the
+ configured TFTP directory (typically /srv/tftp), and builds PXE menu files to
+ present the available releases in a nice nested menu. However, advanced
+ configuration allows one to do more, like:
+ .
+   * BIOS or UEFI boot
+   * Live CD boot via NFS
+   * Customizable keymap
+   * Customizable graphical theme
