@@ -592,7 +592,7 @@ for RELEASE in $RELEASES_LIST ; do
           replace "s,isolinux/,dists/$DISTRIB/$CODENAME/$ARCH/boot-screens/,g" "$GRUB_CONFIG_FILE"
         fi
 
-        # Remove non-existent included files (speeds up initial loading and limits "File not found" errors in log files)
+        # Remove includes of non-existent files (speeds up PXE files loading and limits "File not found" errors in log files)
         print_verbose "Modifying files: removing non-existent included files"
         for CONFIG_FILE in $(find -H "$WORK_DIR/boot-screens" -type f -name "*.cfg") ; do
           print_debug_var "CONFIG_FILE"
