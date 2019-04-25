@@ -1,3 +1,17 @@
+pxe-update (1.1-1) unstable; urgency=medium
+
+  * New upstream version 1.1:
+  * [9cc67eb] Clarify comment about removal of non-existent file includes
+  * [47ee5f8] Add USB Keyboard GRUB module
+  * [acea167] Fix quirks for Linux Mint
+  * [9f63856] Parse new Ubuntu releases web page
+
+  * Packaging changes:
+  * [ba36660] Bump Standards-Version to 4.3.0
+  * [4cb2bb8] Disable "new-package-should-close-itp-bug" lintian override
+
+ -- Raphaël Halimi <raphael.halimi@gmail.com>  Thu, 25 Apr 2019 13:59:49 +0200
+
 pxe-update (1.0-1) unstable; urgency=medium
 
   * Initial release
