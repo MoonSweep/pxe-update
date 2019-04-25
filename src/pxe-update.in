@@ -409,16 +409,21 @@ for RELEASE in $RELEASES_LIST ; do
       fi
 
       # Ubuntu "Suite" conversion
-      # I don't like the idea to rely on parsing a web page but with Ubuntu I didn't find anything better
+      # I don't like the idea to rely on parsing a web page, but with Ubuntu I didn't find anything better
       get_remote_file "http://releases.ubuntu.com" "$RELEASE_FILE"
       if [ -z "$UBUNTU_STABLE" ] ; then
-        UBUNTU_STABLE=$(grep "<li>.*Ubuntu" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
-        UBUNTU_STABLE_VERSION=$(grep "<li>.*Ubuntu" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*Ubuntu //" -e "s/ .*$//")
-        UBUNTU_STABLE_VER_MAJ=$(echo "$UBUNTU_STABLE_VERSION" | cut -d "." -f 1)
-        UBUNTU_STABLE_VER_MIN=$(echo "$UBUNTU_STABLE_VERSION" | cut -d "." -f 2)
-        UBUNTU_LTS=$(grep "<li>.*Ubuntu.*LTS" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
-        UBUNTU_OLDSTABLE=$(grep "<li>.*Ubuntu" "$RELEASE_FILE" | head -n 2 | tail -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
-        UBUNTU_OLDLTS=$(grep "<li>.*Ubuntu.*LTS" "$RELEASE_FILE" | head -n 2 | tail -n 1 | sed -e "s/^.*=\"//" -e "s/\/\".*$//")
+        UBUNTU_RELEASES="$(grep "p-heading--four" "$RELEASE_FILE" | sed -E "s/^.*a href=\"([a-z]+)\/.*>Ubuntu ([0-9\.]+( LTS)*).*$/\2:\1/" | sort -n)"
+        UBUNTU_RELEASES_LTS="$(printf "%s" "$UBUNTU_RELEASES" | grep "LTS")"
+        #UBUNTU_RELEASES_ESM="$(grep "p-heading--five" "$RELEASE_FILE" | sed -E "s/^.*a href=\"([a-z]+)\/.*>Ubuntu ([0-9\.]+( LTS)*).*$/\2:\1/" | sort -n)"
+        UBUNTU_STABLE="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 1 | cut -d : -f 2)"
+        UBUNTU_STABLE_VERSION="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 1 | sed -E "s/^([0-9]{2}\.[0-9]{2}).*$/\1/")"
+        UBUNTU_STABLE_VER_MAJ="${UBUNTU_STABLE_VERSION%.*}"
+        UBUNTU_STABLE_VER_MIN="${UBUNTU_STABLE_VERSION#*.}"
+        UBUNTU_OLDSTABLE="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 2 | head -n 1 | cut -d : -f 2)"
+        UBUNTU_LTS="$(printf "%s" "$UBUNTU_RELEASES_LTS" | tail -n 1 | cut -d : -f 2)"
+        UBUNTU_OLDLTS="$(printf "%s" "$UBUNTU_RELEASES_LTS" | tail -n 2 | head -n 1 | cut -d : -f 2)"
+        #UBUNTU_ESM="$(printf "%s" "$UBUNTU_RELEASES_ESM" | tail -n 1 | cut -d : -f 2)"
+        #UBUNTU_OLDESM="$(printf "%s" "$UBUNTU_RELEASES_ESM" | tail -n 2 | head -n 1 | cut -d : -f 2)"
         print_debug_var "UBUNTU_STABLE" "UBUNTU_STABLE_VERSION" "UBUNTU_STABLE_VER_MAJ" "UBUNTU_STABLE_VER_MIN" "UBUNTU_LTS" "UBUNTU_OLDSTABLE" "UBUNTU_OLDLTS"
       fi
 
@@ -592,7 +597,7 @@ for RELEASE in $RELEASES_LIST ; do
           replace "s,isolinux/,dists/$DISTRIB/$CODENAME/$ARCH/boot-screens/,g" "$GRUB_CONFIG_FILE"
         fi
 
-        # Remove non-existent included files (speeds up initial loading and limits "File not found" errors in log files)
+        # Remove includes of non-existent files (speeds up PXE files loading and limits "File not found" errors in log files)
         print_verbose "Modifying files: removing non-existent included files"
         for CONFIG_FILE in $(find -H "$WORK_DIR/boot-screens" -type f -name "*.cfg") ; do
           print_debug_var "CONFIG_FILE"
@@ -930,16 +935,22 @@ for RELEASE in $RELEASES_LIST ; do
               "APPEND root=/dev/nfs boot=$BOOT_METHOD netboot=nfs nfsroot=$LIVE_NFS_SERVER_IP:$LIVE_NFS_SERVER_DIR/$DISTRIB/$CODENAME/$ARCH/$DESKTOP $LIVE_LOCALIZATION_OPTIONS initrd=dists/$DISTRIB/$CODENAME/$ARCH/livecd/$DESKTOP/$(basename "$INITRD") $APPEND_OPTIONS --" \
               >> "$CODENAME_LIVE_MENU_FILE"
 
-            # Mint doesn't provide netboot installer, so we have to copy the splash screen from ISO contents
+            # Mint doesn't provide netboot installer, so we have to create and/or copy missing files
             if [ "$DISTRIB" = "mint" ] ; then
-              print_verbose "Copying Linux Mint splash screen $LIVE_CONTENTS_WORKDIR/isolinux/splash.$SPLASH_EXT to $WORK_DIR/boot-screens"
+
               [ ! -d "$WORK_DIR/boot-screens" ] && mkdir -p "$WORK_DIR/boot-screens"
+
+              print_verbose "Creating $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
+              printf "" > $CODENAME_ORIG_TXT_MENU_FILE
+
+              print_verbose "Copying $DISTRIB splash screen $LIVE_CONTENTS_WORKDIR/isolinux/splash.$SPLASH_EXT to $WORK_DIR/boot-screens"
               cp -af "$LIVE_CONTENTS_WORKDIR/isolinux/splash.$SPLASH_EXT" "$WORK_DIR/boot-screens"
+
               print_verbose "Creating $DISTRIB $CODENAME standard menu file $WORK_DIR/boot-screens/stdmenu.cfg"
               printf "%s\n%s\n" \
                 "MENU BACKGROUND dists/$DISTRIB/$CODENAME/$ARCH/boot-screens/splash.$SPLASH_EXT" \
                 "MENU VSHIFT 6" \
-                > "$CODENAME_ORIG_TXT_MENU_FILE"
+                > "$WORK_DIR/boot-screens/stdmenu.cfg"
             fi
 
           fi
@@ -1336,8 +1347,8 @@ if [ $RELEASE_MAIN_OK -eq 1 ] ; then
           print_verbose "Adding keyborad map configuration to file $GRUB_CONFIG_FILE"
           printf "%s\n%s\n%s\n%s\n" \
             "insmod keylayouts" \
-            "insmod at_keyboard" \
-            "terminal_input at_keyboard" \
+            "insmod at_keyboard usb_keyboard" \
+            "terminal_input at_keyboard usb_keyboard" \
             "keymap /boot-screens/keymap.gkb" \
             >> "$GRUB_CONFIG_FILE"
         done
