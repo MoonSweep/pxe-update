@@ -1336,8 +1336,8 @@ if [ $RELEASE_MAIN_OK -eq 1 ] ; then
           print_verbose "Adding keyborad map configuration to file $GRUB_CONFIG_FILE"
           printf "%s\n%s\n%s\n%s\n" \
             "insmod keylayouts" \
-            "insmod at_keyboard" \
-            "terminal_input at_keyboard" \
+            "insmod at_keyboard usb_keyboard" \
+            "terminal_input at_keyboard usb_keyboard" \
             "keymap /boot-screens/keymap.gkb" \
             >> "$GRUB_CONFIG_FILE"
         done
