@@ -1379,7 +1379,7 @@ if [ $RELEASE_MAIN_OK -eq 1 ] ; then
     print_debug_var "RELEASE_MAIN_DIR"
 
     # Link EFI files
-    for EFI_BOOT_FILE in $(find -H "$PXE_ROOT_DIR/$RELEASE_MAIN_DIR" -maxdepth 2 -type f -name "bootnet*") ; do
+    for EFI_BOOT_FILE in $(find -H "$PXE_ROOT_DIR/$RELEASE_MAIN_DIR" -maxdepth 2 -type f -name "bootnet*.efi" -o -name "grub*.efi") ; do
       print_debug_var "EFI_BOOT_FILE"
       print_verbose "Creating symlink to EFI file ${EFI_BOOT_FILE#$PXE_ROOT_DIR/} in $PXE_ROOT_DIR"
       ln -sf "${EFI_BOOT_FILE#$PXE_ROOT_DIR/}" "$PXE_ROOT_DIR"
