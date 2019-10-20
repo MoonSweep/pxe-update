@@ -530,8 +530,7 @@ for RELEASE in $RELEASES_LIST ; do
   esac
 
   # Check if the distro has already been processed
-  echo "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME"
-  if [ $? -eq 0 ] ; then
+  if printf "%s" "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" ; then
     print_verbose "Not updating $DISTRIB $CODENAME: already processed"
   else
 
@@ -1073,11 +1072,15 @@ for RELEASE in $RELEASES_LIST ; do
   fi
 
   # Mark distrib:codename as processed
-  echo "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" || PROCESSED_RELEASES_LIST="$PROCESSED_RELEASES_LIST $DISTRIB:$CODENAME"
+  if ! printf "%s" "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" ; then
+    [ -z "$PROCESSED_RELEASES_LIST" ] && PROCESSED_RELEASES_LIST="$DISTRIB:$CODENAME" || PROCESSED_RELEASES_LIST="$PROCESSED_RELEASES_LIST $DISTRIB:$CODENAME"
+  fi
   print_debug_var "PROCESSED_RELEASES_LIST"
 
   # Mark distrib as processed
-  echo "$PROCESSED_DISTRIBS_LIST" | grep -q "$DISTRIB" || PROCESSED_DISTRIBS_LIST="$PROCESSED_DISTRIBS_LIST $DISTRIB"
+  if ! printf "%s" "$PROCESSED_DISTRIBS_LIST" | grep -q "$DISTRIB" ; then
+    [ -z "$PROCESSED_DISTRIBS_LIST" ] && PROCESSED_DISTRIBS_LIST="$DISTRIB" || PROCESSED_DISTRIBS_LIST="$PROCESSED_DISTRIBS_LIST $DISTRIB"
+  fi
   print_debug_var "PROCESSED_DISTRIBS_LIST"
 
   # If this is the main release, mark it as OK and set ARCH_MAIN
