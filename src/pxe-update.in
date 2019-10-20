@@ -390,14 +390,14 @@ for RELEASE in $RELEASES_LIST ; do
   case "$DISTRIB" in 
     debian)
       set_distrib_info
-      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        print_verbose "Couldn't find netboot directory on regular server, trying archive server"
+        print_verbose "Couldn't find release directory on regular server, trying archive server"
         BASE_URL="http://archive.debian.org"
         print_debug_var "BASE_URL"
-        check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+        check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
         if [ $? -ne 0 ] ; then
-          abort_loop "couldn't find netboot directory"
+          abort_loop "couldn't find release directory"
         fi
       fi
       get_remote_file "$BASE_URL/$DISTRIB/dists/$CODENAME/Release" "$RELEASE_FILE"
@@ -473,9 +473,9 @@ for RELEASE in $RELEASES_LIST ; do
 
       print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
 
-      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        abort_loop "couldn't find netboot directory"
+        abort_loop "couldn't find release directory"
       fi
 
       delete_files "$RELEASE_FILE"
@@ -505,7 +505,7 @@ for RELEASE in $RELEASES_LIST ; do
 
       check_remote_dir "$BASE_URL/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        abort_loop "couldn't find packages directory"
+        abort_loop "couldn't find release directory"
       fi
 
       get_remote_file "$BASE_URL/dists/$CODENAME/Release" "$RELEASE_FILE"
