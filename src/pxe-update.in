@@ -263,7 +263,7 @@ SYSTEM_DATA_DIR="@pkgdatadir@"
 USER_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/@PACKAGE@"
 RELEASE_MAIN="$(printf "%s" "$RELEASES_LIST" | cut -d " " -f 1)"
 DISTRO_MAIN="$(printf "%s" "$RELEASE_MAIN" | cut -d : -f 1)"
-ARCH_MAIN="$(printf "%s" "$ARCH_LIST" | cut -d " " -f 1)"
+ARCH_MAIN=""
 PROCESSED_RELEASES_LIST=""
 PROCESSED_DISTRIBS_LIST=""
 [ $LIVE_NONFREE -eq 1 ] && { NONFREE_SUBDIR="/unofficial/non-free/cd-including-firmware" ; NONFREE_SUFFIX="+nonfree" ; }
@@ -543,9 +543,37 @@ for RELEASE in $RELEASES_LIST ; do
       "Suite: $SUITE" \
       "Server: $BASE_URL"
 
+    # Check available architectures
+    RELEASE_ARCH_AVAILABLE_LIST=""
+    for ARCH in $ARCH_LIST ; do
+      if [ "$DISTRIB" != "mint" ] ; then
+        CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
+        PRINT_NETBOOT=" netboot"
+      else
+        CHECK_DIR="$BASE_URL/dists/$CODENAME/main/binary-$ARCH"
+        PRINT_NETBOOT=""
+      fi
+      check_remote_dir "$CHECK_DIR"
+      if [ $? -eq 0 ] ; then
+        [ -z "$RELEASE_ARCH_AVAILABLE_LIST" ] && RELEASE_ARCH_AVAILABLE_LIST="$ARCH" || RELEASE_ARCH_AVAILABLE_LIST="$RELEASE_ARCH_AVAILABLE_LIST $ARCH"
+        print_debug_var "RELEASE_ARCH_AVAILABLE_LIST"
+      fi
+    done
+
+    print_verbose "Available$PRINT_NETBOOT architectures for $DISTRIB $CODENAME: $RELEASE_ARCH_AVAILABLE_LIST"
+
+    # Select main architecture for this release
+    for ARCH_AVAILABLE in $RELEASE_ARCH_AVAILABLE_LIST ; do
+      RELEASE_ARCH_MAIN="$ARCH_AVAILABLE"
+      print_debug_var "RELEASE_ARCH_MAIN"
+      break
+    done
+
+    print_verbose "Main$PRINT_NETBOOT architecture for $DISTRIB $CODENAME: $RELEASE_ARCH_MAIN"
+
     # Release menu file starts here
     CODENAME_MENU_FILE="$BOOT_SCREENS_DIR/$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-${CODENAME}.cfg"
-    CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$ARCH_MAIN/boot-screens/stdmenu.cfg"
+    CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$RELEASE_ARCH_MAIN/boot-screens/stdmenu.cfg"
     if ( [ "$DISTRIB" = "mint" ] && [ "$SUITE" = "LMDE" ] ) ; then
       SPLASH_EXT="jpg"
     else
@@ -567,7 +595,7 @@ for RELEASE in $RELEASES_LIST ; do
       > "$CODENAME_MENU_FILE"
 
     # Loop through architectures for this release
-    for ARCH in $ARCH_LIST ; do
+    for ARCH in $RELEASE_ARCH_AVAILABLE_LIST ; do
 
       print_debug_var "ARCH"
 
@@ -1052,10 +1080,11 @@ for RELEASE in $RELEASES_LIST ; do
   echo "$PROCESSED_DISTRIBS_LIST" | grep -q "$DISTRIB" || PROCESSED_DISTRIBS_LIST="$PROCESSED_DISTRIBS_LIST $DISTRIB"
   print_debug_var "PROCESSED_DISTRIBS_LIST"
 
-  # If this is the main release, mark it as OK
+  # If this is the main release, mark it as OK and set ARCH_MAIN
   if [ "$RELEASE" = "$RELEASE_MAIN" ] ; then
     RELEASE_MAIN_OK=1
-    print_debug_var "RELEASE_MAIN_OK"
+    ARCH_MAIN="$RELEASE_ARCH_MAIN"
+    print_debug_var "RELEASE_MAIN_OK" "ARCH_MAIN"
   fi
   
   print_verbose "Finished processing release: $DISTRIB $CODENAME" 
