@@ -197,6 +197,25 @@ set_distrib_info() {
 }
 
 
+# Compare versions (needs dpkg)
+compare_versions () {
+  local VER_LEFT VER_RIGHT VER_COMP RET
+  if [ $# -ne 3 ] ; then
+    print_error "compare_versions: wrong number of arguments"
+    return 1
+  fi
+  VER_LEFT="$(printf "%s" "$1" | sed -E "s/[^[:digit:].]//g")"
+  VER_RIGHT="$(printf "%s" "$3" | sed -E "s/[^[:digit:].]//g")"
+  VER_COMP="$2"
+  case $VER_COMP in
+    eq|lt|le|ge|gt) true ;;
+    *) print_error "compare_versions: unexpected operator, cannot compare versions" ; return 1 ;;
+  esac
+  print_debug "compare-versions: arguments: $VER_LEFT $VER_COMP $VER_RIGHT"
+  $DPKG_BIN --compare-versions "$VER_LEFT" "$VER_COMP" "$VER_RIGHT"
+}
+
+
 #
 # Configuration files
 #
@@ -307,8 +326,9 @@ print_debug_var \
 lock_script
 
 # Check dependencies
-check_deps lftp fuseiso rsync identify convert
+check_deps lftp dpkg fuseiso rsync identify convert
 [ -z "$LFTP_BIN" ] && die "Binary \"lftp\" not found"
+[ -z "$DPKG_BIN" ] && die "Binary \"dpkg\" not found"
 [ -z "$FUSEISO_BIN" ] && print_verbose "Binary fuseiso not found, unable to process ISO images (consider installing fuseiso)"
 [ -z "$RSYNC_BIN" ] && print_verbose "Binary rsync not found, ISO image contents will be fully copied even if up-to-date (consider installing rsync)"
 [ -z "$IDENTIFY_BIN" ] && print_verbose "Binary \"identify\" not found, unable to resize old format splash screens (consider installing imagemagick)"
@@ -388,8 +408,7 @@ for RELEASE in $RELEASES_LIST ; do
       # For Testing and Unstable, set bogus versions to list them at the end
       [ "$SUITE" = "unstable" ] && VERSION="0.1"
       [ "$SUITE" = "testing" ] && VERSION="0.2"
-      DEBIAN_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
-      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "DEBIAN_VER_MAJ"
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
       delete_files "$RELEASE_FILE"
       ;;
 
@@ -402,9 +421,7 @@ for RELEASE in $RELEASES_LIST ; do
         get_remote_file "$BASE_URL/$DISTRIB/dists/devel/Release" "$RELEASE_FILE"
         UBUNTU_DEVEL=$(grep "^Codename" "$RELEASE_FILE" | cut -d " " -f 2)
         UBUNTU_DEVEL_VERSION=$(grep "^Version" "$RELEASE_FILE" | cut -d " " -f 2)
-        UBUNTU_DEVEL_VER_MAJ=$(echo "$UBUNTU_DEVEL_VERSION" | cut -d "." -f 1)
-        UBUNTU_DEVEL_VER_MIN=$(echo "$UBUNTU_DEVEL_VERSION" | cut -d "." -f 2)
-        print_debug_var "UBUNTU_DEVEL" "UBUNTU_DEVEL_VERSION" "UBUNTU_DEVEL_VER_MAJ" "UBUNTU_DEVEL_VER_MIN"
+        print_debug_var "UBUNTU_DEVEL" "UBUNTU_DEVEL_VERSION"
         delete_files "$RELEASE_FILE"
       fi
 
@@ -417,14 +434,12 @@ for RELEASE in $RELEASES_LIST ; do
         #UBUNTU_RELEASES_ESM="$(grep "p-heading--five" "$RELEASE_FILE" | sed -E "s/^.*a href=\"([a-z]+)\/.*>Ubuntu ([0-9\.]+( LTS)*).*$/\2:\1/" | sort -n)"
         UBUNTU_STABLE="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 1 | cut -d : -f 2)"
         UBUNTU_STABLE_VERSION="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 1 | sed -E "s/^([0-9]{2}\.[0-9]{2}).*$/\1/")"
-        UBUNTU_STABLE_VER_MAJ="${UBUNTU_STABLE_VERSION%.*}"
-        UBUNTU_STABLE_VER_MIN="${UBUNTU_STABLE_VERSION#*.}"
         UBUNTU_OLDSTABLE="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 2 | head -n 1 | cut -d : -f 2)"
         UBUNTU_LTS="$(printf "%s" "$UBUNTU_RELEASES_LTS" | tail -n 1 | cut -d : -f 2)"
         UBUNTU_OLDLTS="$(printf "%s" "$UBUNTU_RELEASES_LTS" | tail -n 2 | head -n 1 | cut -d : -f 2)"
         #UBUNTU_ESM="$(printf "%s" "$UBUNTU_RELEASES_ESM" | tail -n 1 | cut -d : -f 2)"
         #UBUNTU_OLDESM="$(printf "%s" "$UBUNTU_RELEASES_ESM" | tail -n 2 | head -n 1 | cut -d : -f 2)"
-        print_debug_var "UBUNTU_STABLE" "UBUNTU_STABLE_VERSION" "UBUNTU_STABLE_VER_MAJ" "UBUNTU_STABLE_VER_MIN" "UBUNTU_LTS" "UBUNTU_OLDSTABLE" "UBUNTU_OLDLTS"
+        print_debug_var "UBUNTU_STABLE" "UBUNTU_STABLE_VERSION" "UBUNTU_LTS" "UBUNTU_OLDSTABLE" "UBUNTU_OLDLTS"
       fi
 
       # For Ubuntu devel, set bogus version to list it at the end
@@ -435,7 +450,7 @@ for RELEASE in $RELEASES_LIST ; do
         SUITE="devel"
 
         # We need this because Ubuntu rolls back some versions prior to creating a new devel distro
-        if ( [ "$UBUNTU_DEVEL_VER_MAJ" -lt "$UBUNTU_STABLE_VER_MAJ" ] || ( [ "$UBUNTU_DEVEL_VER_MAJ" -eq "$UBUNTU_STABLE_VER_MAJ" ] && [ "$UBUNTU_DEVEL_VER_MIN" -le "$UBUNTU_STABLE_VER_MIN" ] ) ) ; then
+        if compare_versions "$UBUNTU_DEVEL_VERSION" le "$UBUNTU_STABLE_VERSION" ; then
           delete_files "$PXE_ROOT_DIR/dists/$DISTRIB/$SUITE"
           abort_loop "New Ubuntu stable version released recently, devel version not available yet"
         fi
@@ -454,11 +469,9 @@ for RELEASE in $RELEASES_LIST ; do
         esac
         CODENAME_FULL=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*(//" -e "s/).*$//")
         VERSION=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*Ubuntu //" -e "s/ (.*$//")
-        UBUNTU_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
-        UBUNTU_VER_MIN=$(echo "$VERSION" | cut -d "." -f 2)
       fi
 
-      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "UBUNTU_VER_MAJ" "UBUNTU_VER_MIN"
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
 
       check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
       if [ $? -ne 0 ] ; then
@@ -498,8 +511,7 @@ for RELEASE in $RELEASES_LIST ; do
       get_remote_file "$BASE_URL/dists/$CODENAME/Release" "$RELEASE_FILE"
       CODENAME_FULL=$(echo "$CODENAME" | sed -e "s/^./\u&/")
       VERSION=$(grep "^Version" "$RELEASE_FILE" | cut -d " " -f 2)
-      MINT_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
-      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "MINT_VER_MAJ"
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
 
       delete_files "$RELEASE_FILE"
       ;;
@@ -714,9 +726,9 @@ for RELEASE in $RELEASES_LIST ; do
 
           debian)
             # No Live images are provided for Testing and Unstable, and we don't support pre-Wheezy
-            if [ "$DEBIAN_VER_MAJ" -eq 0 ] ; then
+            if compare_versions "$VERSION" lt 1 ; then
               print_verbose "Live images not available for $DISTRIB $SUITE, skipping ISO processing."
-            elif [ "$DEBIAN_VER_MAJ" -lt 7 ] ; then
+            elif compare_versions "$VERSION" lt 7 ; then
               print_verbose "Live images not supported for $DISTRIB $CODENAME, skipping ISO processing."
             else
               # Debian ISOs subdir depends on whether we're processing stable, and if we use non-free
@@ -743,9 +755,9 @@ for RELEASE in $RELEASES_LIST ; do
                 COUNTER=$((COUNTER+1))
               done
               if [ $PATCHLEVEL_FOUND -eq 1 ] ; then
-                if [ "$DEBIAN_VER_MAJ" -eq 7 ] ; then
+                if compare_versions "$VERSION" lt 8 ; then
                   DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_7"
-                elif [ "$DEBIAN_VER_MAJ" -eq 8 ] ; then
+                elif compare_versions "$VERSION" lt 9 ; then
                   DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_8"
                 else
                   DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_9"
@@ -759,7 +771,7 @@ for RELEASE in $RELEASES_LIST ; do
           ubuntu)
             if [ "$SUITE" = "devel" ] ; then
               print_verbose "Live images not supported for $DISTRIB $SUITE, skipping ISO processing."
-            elif [ "$ARCH" = "i386" ] && ( ( [ $UBUNTU_VER_MAJ -eq 17 ] && [ $UBUNTU_VER_MIN -eq 10 ] ) || [ $UBUNTU_VER_MAJ -ge 18 ] ) ; then
+            elif [ "$ARCH" = "i386" ] && compare_versions "$VERSION" ge 17.10 ; then
               print_verbose "$DISTRIB_FULL stopped releasing live Desktop images on $ARCH architecture since 17.10, skipping ISO processing."
             else
               DESKTOP_LIST="$LIVE_DESKTOP_LIST_UBUNTU"
@@ -800,7 +812,7 @@ for RELEASE in $RELEASES_LIST ; do
               LATEST_ISO_FILE="$DISTRIB-live-$VERSION$DEBIAN_ISO_PATCHLEVEL-$ARCH-$DESKTOP$NONFREE_SUFFIX.iso"
               LATEST_ISO_URL="$LIVE_MIRROR_DEBIAN/cdimage$NONFREE_SUBDIR/$DEBIAN_ISO_SUBDIR$VERSION$DEBIAN_ISO_PATCHLEVEL-live$NONFREE_SUFFIX/$ARCH/iso-hybrid/$LATEST_ISO_FILE"
               BOOT_METHOD="live"
-              if [ "$DEBIAN_VER_MAJ" -ge 8 ] ; then
+              if compare_versions "$VERSION" ge 8 ; then
                 APPEND_OPTIONS="components"
               else
                 APPEND_OPTIONS="config"
@@ -821,7 +833,11 @@ for RELEASE in $RELEASES_LIST ; do
                 BOOT_METHOD="live"
                 APPEND_OPTIONS="config"
               else
-                [ "$MINT_VER_MAJ" -le 16 ] && DVD_SUFFIX="-dvd"
+                if compare_versions "$VERSION" le 16 ; then
+                  DVD_SUFFIX="-dvd"
+                else
+                  DVD_SUFFIX=""
+                fi
                 LATEST_ISO_FILE="linux$DISTRIB-$VERSION-$DESKTOP$DVD_SUFFIX-$MINT_ARCH.iso"
                 LATEST_ISO_URL="$LIVE_MIRROR_MINT/stable/$VERSION/$LATEST_ISO_FILE"
                 BOOT_METHOD="casper"
