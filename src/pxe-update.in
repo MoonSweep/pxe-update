@@ -90,7 +90,7 @@ print_usage () {
 
 # Print a message and continue to next iteration: <message>
 abort_loop() {
-  print_error "$1, aborting $RELEASE"
+  print_error "abort_loop: $1, aborting $RELEASE"
   delete_files "$RELEASE_FILE"
   continue
 }
@@ -100,7 +100,7 @@ get_remote_file () {
   print_verbose "Downloading $1"
   $LFTP_BIN -c "get1 $1 -o $2" > /dev/null 2>&1
   if [ $? -ne 0 ] ; then
-    die "problem occured while trying to download file $1"
+    die "get_remote_file: problem occured while trying to download file $1"
   fi
 }
 
@@ -115,7 +115,7 @@ mirror_remote_dir () {
   print_verbose "Mirroring $1 to $2"
   $LFTP_BIN -c "mirror $1 $2" > /dev/null 2>&1
   if [ $? -ne 0 ] ; then
-    abort_loop "problem occured while trying to mirror directory $1"
+    abort_loop "mirror_remote_dir: problem occured while trying to mirror directory $1"
   fi
 }
 
@@ -127,7 +127,7 @@ replace() {
   SED_COMMAND="$1" ; shift
   print_debug_var "SED_COMMAND"
   if [ "$(printf "%s" "$SED_COMMAND" | cut -c 1)" != "s" ] ; then
-    print_error "\"$SED_COMMAND\" doesn't seem to be a sed substitute command."
+    print_error "replace: \"$SED_COMMAND\" doesn't seem to be a sed substitute command."
     return 1
   fi
   SED_COMMAND_SEPARATOR="$(printf "%s" "$SED_COMMAND" | cut -c 2)"
@@ -140,7 +140,7 @@ replace() {
     print_verbose "Modifying files: $COMMENT"
     sed -r -i -e "$SED_COMMAND" -e "1s$SED_COMMAND_SEPARATOR^$SED_COMMAND_SEPARATOR# Modified by $SCRIPT_NAME: $COMMENT\n$SED_COMMAND_SEPARATOR" "$@"
     if [ $? -ne 0 ] ; then
-      abort_loop "problem occured during file modification"
+      abort_loop "replace: problem occured during file modification"
     fi
   fi
 }
