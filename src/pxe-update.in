@@ -90,9 +90,9 @@ print_usage () {
 
 # Print a message and continue to next iteration: <message>
 abort_loop() {
-  print_error "abort_loop: $1, aborting $RELEASE"
+  print_error "abort_loop: $1, aborting $DISTRIB $CODENAME $ARCH"
   delete_files "$RELEASE_FILE"
-  continue
+  return 1
 }
 
 # Download a single remote file: <URL> <local name>
@@ -386,6 +386,7 @@ for RELEASE in $RELEASES_LIST ; do
   SUITE=""
   DISTRIB=$(echo "$RELEASE" | cut -d ":" -f 1)
   CODENAME=$(echo "$RELEASE" | cut -d ":" -f 2)
+  ARCH=""
   RELEASE_FILE="/tmp/$DISTRIB-$CODENAME-Release.$$"
   print_debug_var "SUITE" "DISTRIB" "CODENAME" "RELEASE_FILE"
   print_verbose "##### Processing release: $DISTRIB $CODENAME #####"
@@ -402,7 +403,7 @@ for RELEASE in $RELEASES_LIST ; do
         print_debug_var "BASE_URL"
         check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
         if [ $? -ne 0 ] ; then
-          abort_loop "couldn't find release directory"
+          abort_loop "couldn't find release directory" || continue
         fi
       fi
       get_remote_file "$BASE_URL/$DISTRIB/dists/$CODENAME/Release" "$RELEASE_FILE"
@@ -457,7 +458,7 @@ for RELEASE in $RELEASES_LIST ; do
         # We need this because Ubuntu rolls back some versions prior to creating a new devel distro
         if compare_versions "$UBUNTU_DEVEL_VERSION" le "$UBUNTU_STABLE_VERSION" ; then
           delete_files "$PXE_ROOT_DIR/dists/$DISTRIB/$SUITE"
-          abort_loop "New Ubuntu stable version released recently, devel version not available yet"
+          abort_loop "New Ubuntu stable version released recently, devel version not available yet" || continue
         fi
 
       else
@@ -480,7 +481,7 @@ for RELEASE in $RELEASES_LIST ; do
 
       check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        abort_loop "couldn't find release directory"
+        abort_loop "couldn't find release directory" || continue
       fi
 
       delete_files "$RELEASE_FILE"
@@ -510,7 +511,7 @@ for RELEASE in $RELEASES_LIST ; do
 
       check_remote_dir "$BASE_URL/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        abort_loop "couldn't find release directory"
+        abort_loop "couldn't find release directory" || continue
       fi
 
       get_remote_file "$BASE_URL/dists/$CODENAME/Release" "$RELEASE_FILE"
@@ -523,7 +524,7 @@ for RELEASE in $RELEASES_LIST ; do
 
     *)
 
-    abort_loop "unsupported distribution $DISTRIB"
+    abort_loop "unsupported distribution $DISTRIB" || continue
     ;;
 
   esac
@@ -583,7 +584,7 @@ for RELEASE in $RELEASES_LIST ; do
         # Mirror netboot directory
         NETBOOT_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
         print_debug_var "NETBOOT_DIR"
-        mirror_remote_dir "$NETBOOT_DIR/$DISTRIB-installer/$ARCH" "$WORK_DIR"
+        mirror_remote_dir "$NETBOOT_DIR/$DISTRIB-installer/$ARCH" "$WORK_DIR" || continue
 
         #
         # Files modification
@@ -650,7 +651,7 @@ for RELEASE in $RELEASES_LIST ; do
           [ -d "$WORK_DIR/gtk" ] || mkdir "$WORK_DIR/gtk"
 
           # Mirror GTK netboot directory
-          mirror_remote_dir "$NETBOOT_DIR/gtk/$DISTRIB-installer/$ARCH" "$WORK_DIR/gtk"
+          mirror_remote_dir "$NETBOOT_DIR/gtk/$DISTRIB-installer/$ARCH" "$WORK_DIR/gtk" || continue
 
           #
           # Files modification
@@ -795,7 +796,7 @@ for RELEASE in $RELEASES_LIST ; do
               amd64)
                 MINT_ARCH="64bit" ;;
               *)
-                abort_loop "unsupported achitecture for Linux Mint" ;;
+                print_error "unsupported achitecture for Linux Mint" ; DESKTOP_LIST="" ;;
             esac
             print_debug_var "MINT_ARCH"
             ;;
