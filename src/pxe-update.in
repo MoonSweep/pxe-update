@@ -112,10 +112,15 @@ check_remote_dir () {
 
 # Mirror remote directory: <URL> <local directory>
 mirror_remote_dir () {
-  print_verbose "Mirroring $1 to $2"
-  $LFTP_BIN -c "mirror $1 $2" > /dev/null 2>&1
-  if [ $? -ne 0 ] ; then
-    abort_loop "mirror_remote_dir: problem occured while trying to mirror directory $1"
+  check_remote_dir "$1"
+  if [ $? -eq 0 ] ; then
+    print_verbose "Mirroring $1 to $2"
+    $LFTP_BIN -c "mirror $1 $2" > /dev/null 2>&1
+    if [ $? -ne 0 ] ; then
+      abort_loop "mirror_remote_dir: problem occured while trying to mirror directory $1"
+    fi
+  else
+    abort_loop "mirror_remote_dir: couldn't find remote directory"
   fi
 }
 
