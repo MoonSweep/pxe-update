@@ -90,9 +90,9 @@ print_usage () {
 
 # Print a message and continue to next iteration: <message>
 abort_loop() {
-  print_error "$1, aborting $RELEASE"
+  print_error "abort_loop: $1, aborting $DISTRIB $CODENAME $ARCH"
   delete_files "$RELEASE_FILE"
-  continue
+  return 1
 }
 
 # Download a single remote file: <URL> <local name>
@@ -100,7 +100,7 @@ get_remote_file () {
   print_verbose "Downloading $1"
   $LFTP_BIN -c "get1 $1 -o $2" > /dev/null 2>&1
   if [ $? -ne 0 ] ; then
-    die "problem occured while trying to download file $1"
+    die "get_remote_file: problem occured while trying to download file $1"
   fi
 }
 
@@ -112,10 +112,15 @@ check_remote_dir () {
 
 # Mirror remote directory: <URL> <local directory>
 mirror_remote_dir () {
-  print_verbose "Mirroring $1 to $2"
-  $LFTP_BIN -c "mirror $1 $2" > /dev/null 2>&1
-  if [ $? -ne 0 ] ; then
-    abort_loop "problem occured while trying to mirror directory $1"
+  check_remote_dir "$1"
+  if [ $? -eq 0 ] ; then
+    print_verbose "Mirroring $1 to $2"
+    $LFTP_BIN -c "mirror $1 $2" > /dev/null 2>&1
+    if [ $? -ne 0 ] ; then
+      abort_loop "mirror_remote_dir: problem occured while trying to mirror directory $1"
+    fi
+  else
+    abort_loop "mirror_remote_dir: couldn't find remote directory"
   fi
 }
 
@@ -127,7 +132,7 @@ replace() {
   SED_COMMAND="$1" ; shift
   print_debug_var "SED_COMMAND"
   if [ "$(printf "%s" "$SED_COMMAND" | cut -c 1)" != "s" ] ; then
-    print_error "\"$SED_COMMAND\" doesn't seem to be a sed substitute command."
+    print_error "replace: \"$SED_COMMAND\" doesn't seem to be a sed substitute command."
     return 1
   fi
   SED_COMMAND_SEPARATOR="$(printf "%s" "$SED_COMMAND" | cut -c 2)"
@@ -140,7 +145,7 @@ replace() {
     print_verbose "Modifying files: $COMMENT"
     sed -r -i -e "$SED_COMMAND" -e "1s$SED_COMMAND_SEPARATOR^$SED_COMMAND_SEPARATOR# Modified by $SCRIPT_NAME: $COMMENT\n$SED_COMMAND_SEPARATOR" "$@"
     if [ $? -ne 0 ] ; then
-      abort_loop "problem occured during file modification"
+      abort_loop "replace: problem occured during file modification"
     fi
   fi
 }
@@ -197,6 +202,25 @@ set_distrib_info() {
 }
 
 
+# Compare versions (needs dpkg)
+compare_versions () {
+  local VER_LEFT VER_RIGHT VER_COMP RET
+  if [ $# -ne 3 ] ; then
+    print_error "compare_versions: wrong number of arguments"
+    return 1
+  fi
+  VER_LEFT="$(printf "%s" "$1" | sed -E "s/[^[:digit:].]//g")"
+  VER_RIGHT="$(printf "%s" "$3" | sed -E "s/[^[:digit:].]//g")"
+  VER_COMP="$2"
+  case $VER_COMP in
+    eq|lt|le|ge|gt) true ;;
+    *) print_error "compare_versions: unexpected operator, cannot compare versions" ; return 1 ;;
+  esac
+  print_debug "compare-versions: arguments: $VER_LEFT $VER_COMP $VER_RIGHT"
+  $DPKG_BIN --compare-versions "$VER_LEFT" "$VER_COMP" "$VER_RIGHT"
+}
+
+
 #
 # Configuration files
 #
@@ -239,7 +263,7 @@ SYSTEM_DATA_DIR="@pkgdatadir@"
 USER_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/@PACKAGE@"
 RELEASE_MAIN="$(printf "%s" "$RELEASES_LIST" | cut -d " " -f 1)"
 DISTRO_MAIN="$(printf "%s" "$RELEASE_MAIN" | cut -d : -f 1)"
-ARCH_MAIN="$(printf "%s" "$ARCH_LIST" | cut -d " " -f 1)"
+ARCH_MAIN=""
 PROCESSED_RELEASES_LIST=""
 PROCESSED_DISTRIBS_LIST=""
 [ $LIVE_NONFREE -eq 1 ] && { NONFREE_SUBDIR="/unofficial/non-free/cd-including-firmware" ; NONFREE_SUFFIX="+nonfree" ; }
@@ -307,8 +331,9 @@ print_debug_var \
 lock_script
 
 # Check dependencies
-check_deps lftp fuseiso rsync identify convert
+check_deps lftp dpkg fuseiso rsync identify convert
 [ -z "$LFTP_BIN" ] && die "Binary \"lftp\" not found"
+[ -z "$DPKG_BIN" ] && die "Binary \"dpkg\" not found"
 [ -z "$FUSEISO_BIN" ] && print_verbose "Binary fuseiso not found, unable to process ISO images (consider installing fuseiso)"
 [ -z "$RSYNC_BIN" ] && print_verbose "Binary rsync not found, ISO image contents will be fully copied even if up-to-date (consider installing rsync)"
 [ -z "$IDENTIFY_BIN" ] && print_verbose "Binary \"identify\" not found, unable to resize old format splash screens (consider installing imagemagick)"
@@ -361,6 +386,7 @@ for RELEASE in $RELEASES_LIST ; do
   SUITE=""
   DISTRIB=$(echo "$RELEASE" | cut -d ":" -f 1)
   CODENAME=$(echo "$RELEASE" | cut -d ":" -f 2)
+  ARCH=""
   RELEASE_FILE="/tmp/$DISTRIB-$CODENAME-Release.$$"
   print_debug_var "SUITE" "DISTRIB" "CODENAME" "RELEASE_FILE"
   print_verbose "##### Processing release: $DISTRIB $CODENAME #####"
@@ -370,14 +396,14 @@ for RELEASE in $RELEASES_LIST ; do
   case "$DISTRIB" in 
     debian)
       set_distrib_info
-      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        print_verbose "Couldn't find netboot directory on regular server, trying archive server"
+        print_verbose "Couldn't find release directory on regular server, trying archive server"
         BASE_URL="http://archive.debian.org"
         print_debug_var "BASE_URL"
-        check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+        check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
         if [ $? -ne 0 ] ; then
-          abort_loop "couldn't find netboot directory"
+          abort_loop "couldn't find release directory" || continue
         fi
       fi
       get_remote_file "$BASE_URL/$DISTRIB/dists/$CODENAME/Release" "$RELEASE_FILE"
@@ -388,8 +414,7 @@ for RELEASE in $RELEASES_LIST ; do
       # For Testing and Unstable, set bogus versions to list them at the end
       [ "$SUITE" = "unstable" ] && VERSION="0.1"
       [ "$SUITE" = "testing" ] && VERSION="0.2"
-      DEBIAN_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
-      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "DEBIAN_VER_MAJ"
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
       delete_files "$RELEASE_FILE"
       ;;
 
@@ -402,9 +427,7 @@ for RELEASE in $RELEASES_LIST ; do
         get_remote_file "$BASE_URL/$DISTRIB/dists/devel/Release" "$RELEASE_FILE"
         UBUNTU_DEVEL=$(grep "^Codename" "$RELEASE_FILE" | cut -d " " -f 2)
         UBUNTU_DEVEL_VERSION=$(grep "^Version" "$RELEASE_FILE" | cut -d " " -f 2)
-        UBUNTU_DEVEL_VER_MAJ=$(echo "$UBUNTU_DEVEL_VERSION" | cut -d "." -f 1)
-        UBUNTU_DEVEL_VER_MIN=$(echo "$UBUNTU_DEVEL_VERSION" | cut -d "." -f 2)
-        print_debug_var "UBUNTU_DEVEL" "UBUNTU_DEVEL_VERSION" "UBUNTU_DEVEL_VER_MAJ" "UBUNTU_DEVEL_VER_MIN"
+        print_debug_var "UBUNTU_DEVEL" "UBUNTU_DEVEL_VERSION"
         delete_files "$RELEASE_FILE"
       fi
 
@@ -417,14 +440,12 @@ for RELEASE in $RELEASES_LIST ; do
         #UBUNTU_RELEASES_ESM="$(grep "p-heading--five" "$RELEASE_FILE" | sed -E "s/^.*a href=\"([a-z]+)\/.*>Ubuntu ([0-9\.]+( LTS)*).*$/\2:\1/" | sort -n)"
         UBUNTU_STABLE="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 1 | cut -d : -f 2)"
         UBUNTU_STABLE_VERSION="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 1 | sed -E "s/^([0-9]{2}\.[0-9]{2}).*$/\1/")"
-        UBUNTU_STABLE_VER_MAJ="${UBUNTU_STABLE_VERSION%.*}"
-        UBUNTU_STABLE_VER_MIN="${UBUNTU_STABLE_VERSION#*.}"
         UBUNTU_OLDSTABLE="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 2 | head -n 1 | cut -d : -f 2)"
         UBUNTU_LTS="$(printf "%s" "$UBUNTU_RELEASES_LTS" | tail -n 1 | cut -d : -f 2)"
         UBUNTU_OLDLTS="$(printf "%s" "$UBUNTU_RELEASES_LTS" | tail -n 2 | head -n 1 | cut -d : -f 2)"
         #UBUNTU_ESM="$(printf "%s" "$UBUNTU_RELEASES_ESM" | tail -n 1 | cut -d : -f 2)"
         #UBUNTU_OLDESM="$(printf "%s" "$UBUNTU_RELEASES_ESM" | tail -n 2 | head -n 1 | cut -d : -f 2)"
-        print_debug_var "UBUNTU_STABLE" "UBUNTU_STABLE_VERSION" "UBUNTU_STABLE_VER_MAJ" "UBUNTU_STABLE_VER_MIN" "UBUNTU_LTS" "UBUNTU_OLDSTABLE" "UBUNTU_OLDLTS"
+        print_debug_var "UBUNTU_STABLE" "UBUNTU_STABLE_VERSION" "UBUNTU_LTS" "UBUNTU_OLDSTABLE" "UBUNTU_OLDLTS"
       fi
 
       # For Ubuntu devel, set bogus version to list it at the end
@@ -435,9 +456,9 @@ for RELEASE in $RELEASES_LIST ; do
         SUITE="devel"
 
         # We need this because Ubuntu rolls back some versions prior to creating a new devel distro
-        if ( [ "$UBUNTU_DEVEL_VER_MAJ" -lt "$UBUNTU_STABLE_VER_MAJ" ] || ( [ "$UBUNTU_DEVEL_VER_MAJ" -eq "$UBUNTU_STABLE_VER_MAJ" ] && [ "$UBUNTU_DEVEL_VER_MIN" -le "$UBUNTU_STABLE_VER_MIN" ] ) ) ; then
+        if compare_versions "$UBUNTU_DEVEL_VERSION" le "$UBUNTU_STABLE_VERSION" ; then
           delete_files "$PXE_ROOT_DIR/dists/$DISTRIB/$SUITE"
-          abort_loop "New Ubuntu stable version released recently, devel version not available yet"
+          abort_loop "New Ubuntu stable version released recently, devel version not available yet" || continue
         fi
 
       else
@@ -454,15 +475,13 @@ for RELEASE in $RELEASES_LIST ; do
         esac
         CODENAME_FULL=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*(//" -e "s/).*$//")
         VERSION=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*Ubuntu //" -e "s/ (.*$//")
-        UBUNTU_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
-        UBUNTU_VER_MIN=$(echo "$VERSION" | cut -d "." -f 2)
       fi
 
-      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "UBUNTU_VER_MAJ" "UBUNTU_VER_MIN"
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
 
-      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH_MAIN/current/images/netboot"
+      check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        abort_loop "couldn't find netboot directory"
+        abort_loop "couldn't find release directory" || continue
       fi
 
       delete_files "$RELEASE_FILE"
@@ -492,28 +511,26 @@ for RELEASE in $RELEASES_LIST ; do
 
       check_remote_dir "$BASE_URL/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        abort_loop "couldn't find packages directory"
+        abort_loop "couldn't find release directory" || continue
       fi
 
       get_remote_file "$BASE_URL/dists/$CODENAME/Release" "$RELEASE_FILE"
       CODENAME_FULL=$(echo "$CODENAME" | sed -e "s/^./\u&/")
       VERSION=$(grep "^Version" "$RELEASE_FILE" | cut -d " " -f 2)
-      MINT_VER_MAJ=$(echo "$VERSION" | cut -d "." -f 1)
-      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE" "MINT_VER_MAJ"
+      print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
 
       delete_files "$RELEASE_FILE"
       ;;
 
     *)
 
-    abort_loop "unsupported distribution $DISTRIB"
+    abort_loop "unsupported distribution $DISTRIB" || continue
     ;;
 
   esac
 
   # Check if the distro has already been processed
-  echo "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME"
-  if [ $? -eq 0 ] ; then
+  if printf "%s" "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" ; then
     print_verbose "Not updating $DISTRIB $CODENAME: already processed"
   else
 
@@ -525,9 +542,37 @@ for RELEASE in $RELEASES_LIST ; do
       "Suite: $SUITE" \
       "Server: $BASE_URL"
 
+    # Check available architectures
+    RELEASE_ARCH_AVAILABLE_LIST=""
+    for ARCH in $ARCH_LIST ; do
+      if [ "$DISTRIB" != "mint" ] ; then
+        CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
+        PRINT_NETBOOT=" netboot"
+      else
+        CHECK_DIR="$BASE_URL/dists/$CODENAME/main/binary-$ARCH"
+        PRINT_NETBOOT=""
+      fi
+      check_remote_dir "$CHECK_DIR"
+      if [ $? -eq 0 ] ; then
+        [ -z "$RELEASE_ARCH_AVAILABLE_LIST" ] && RELEASE_ARCH_AVAILABLE_LIST="$ARCH" || RELEASE_ARCH_AVAILABLE_LIST="$RELEASE_ARCH_AVAILABLE_LIST $ARCH"
+        print_debug_var "RELEASE_ARCH_AVAILABLE_LIST"
+      fi
+    done
+
+    print_verbose "Available$PRINT_NETBOOT architectures for $DISTRIB $CODENAME: $RELEASE_ARCH_AVAILABLE_LIST"
+
+    # Select main architecture for this release
+    for ARCH_AVAILABLE in $RELEASE_ARCH_AVAILABLE_LIST ; do
+      RELEASE_ARCH_MAIN="$ARCH_AVAILABLE"
+      print_debug_var "RELEASE_ARCH_MAIN"
+      break
+    done
+
+    print_verbose "Main$PRINT_NETBOOT architecture for $DISTRIB $CODENAME: $RELEASE_ARCH_MAIN"
+
     # Release menu file starts here
     CODENAME_MENU_FILE="$BOOT_SCREENS_DIR/$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-${CODENAME}.cfg"
-    CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$ARCH_MAIN/boot-screens/stdmenu.cfg"
+    CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$RELEASE_ARCH_MAIN/boot-screens/stdmenu.cfg"
     if ( [ "$DISTRIB" = "mint" ] && [ "$SUITE" = "LMDE" ] ) ; then
       SPLASH_EXT="jpg"
     else
@@ -549,7 +594,7 @@ for RELEASE in $RELEASES_LIST ; do
       > "$CODENAME_MENU_FILE"
 
     # Loop through architectures for this release
-    for ARCH in $ARCH_LIST ; do
+    for ARCH in $RELEASE_ARCH_AVAILABLE_LIST ; do
 
       print_debug_var "ARCH"
 
@@ -566,7 +611,7 @@ for RELEASE in $RELEASES_LIST ; do
         # Mirror netboot directory
         NETBOOT_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
         print_debug_var "NETBOOT_DIR"
-        mirror_remote_dir "$NETBOOT_DIR/$DISTRIB-installer/$ARCH" "$WORK_DIR"
+        mirror_remote_dir "$NETBOOT_DIR/$DISTRIB-installer/$ARCH" "$WORK_DIR" || continue
 
         #
         # Files modification
@@ -633,7 +678,7 @@ for RELEASE in $RELEASES_LIST ; do
           [ -d "$WORK_DIR/gtk" ] || mkdir "$WORK_DIR/gtk"
 
           # Mirror GTK netboot directory
-          mirror_remote_dir "$NETBOOT_DIR/gtk/$DISTRIB-installer/$ARCH" "$WORK_DIR/gtk"
+          mirror_remote_dir "$NETBOOT_DIR/gtk/$DISTRIB-installer/$ARCH" "$WORK_DIR/gtk" || continue
 
           #
           # Files modification
@@ -714,9 +759,9 @@ for RELEASE in $RELEASES_LIST ; do
 
           debian)
             # No Live images are provided for Testing and Unstable, and we don't support pre-Wheezy
-            if [ "$DEBIAN_VER_MAJ" -eq 0 ] ; then
+            if compare_versions "$VERSION" lt 1 ; then
               print_verbose "Live images not available for $DISTRIB $SUITE, skipping ISO processing."
-            elif [ "$DEBIAN_VER_MAJ" -lt 7 ] ; then
+            elif compare_versions "$VERSION" lt 7 ; then
               print_verbose "Live images not supported for $DISTRIB $CODENAME, skipping ISO processing."
             else
               # Debian ISOs subdir depends on whether we're processing stable, and if we use non-free
@@ -743,9 +788,9 @@ for RELEASE in $RELEASES_LIST ; do
                 COUNTER=$((COUNTER+1))
               done
               if [ $PATCHLEVEL_FOUND -eq 1 ] ; then
-                if [ "$DEBIAN_VER_MAJ" -eq 7 ] ; then
+                if compare_versions "$VERSION" lt 8 ; then
                   DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_7"
-                elif [ "$DEBIAN_VER_MAJ" -eq 8 ] ; then
+                elif compare_versions "$VERSION" lt 9 ; then
                   DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_8"
                 else
                   DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_9"
@@ -759,7 +804,7 @@ for RELEASE in $RELEASES_LIST ; do
           ubuntu)
             if [ "$SUITE" = "devel" ] ; then
               print_verbose "Live images not supported for $DISTRIB $SUITE, skipping ISO processing."
-            elif [ "$ARCH" = "i386" ] && ( ( [ $UBUNTU_VER_MAJ -eq 17 ] && [ $UBUNTU_VER_MIN -eq 10 ] ) || [ $UBUNTU_VER_MAJ -ge 18 ] ) ; then
+            elif [ "$ARCH" = "i386" ] && compare_versions "$VERSION" ge 17.10 ; then
               print_verbose "$DISTRIB_FULL stopped releasing live Desktop images on $ARCH architecture since 17.10, skipping ISO processing."
             else
               DESKTOP_LIST="$LIVE_DESKTOP_LIST_UBUNTU"
@@ -778,7 +823,7 @@ for RELEASE in $RELEASES_LIST ; do
               amd64)
                 MINT_ARCH="64bit" ;;
               *)
-                abort_loop "unsupported achitecture for Linux Mint" ;;
+                print_error "unsupported achitecture for Linux Mint" ; DESKTOP_LIST="" ;;
             esac
             print_debug_var "MINT_ARCH"
             ;;
@@ -800,7 +845,7 @@ for RELEASE in $RELEASES_LIST ; do
               LATEST_ISO_FILE="$DISTRIB-live-$VERSION$DEBIAN_ISO_PATCHLEVEL-$ARCH-$DESKTOP$NONFREE_SUFFIX.iso"
               LATEST_ISO_URL="$LIVE_MIRROR_DEBIAN/cdimage$NONFREE_SUBDIR/$DEBIAN_ISO_SUBDIR$VERSION$DEBIAN_ISO_PATCHLEVEL-live$NONFREE_SUFFIX/$ARCH/iso-hybrid/$LATEST_ISO_FILE"
               BOOT_METHOD="live"
-              if [ "$DEBIAN_VER_MAJ" -ge 8 ] ; then
+              if compare_versions "$VERSION" ge 8 ; then
                 APPEND_OPTIONS="components"
               else
                 APPEND_OPTIONS="config"
@@ -821,7 +866,11 @@ for RELEASE in $RELEASES_LIST ; do
                 BOOT_METHOD="live"
                 APPEND_OPTIONS="config"
               else
-                [ "$MINT_VER_MAJ" -le 16 ] && DVD_SUFFIX="-dvd"
+                if compare_versions "$VERSION" le 16 ; then
+                  DVD_SUFFIX="-dvd"
+                else
+                  DVD_SUFFIX=""
+                fi
                 LATEST_ISO_FILE="linux$DISTRIB-$VERSION-$DESKTOP$DVD_SUFFIX-$MINT_ARCH.iso"
                 LATEST_ISO_URL="$LIVE_MIRROR_MINT/stable/$VERSION/$LATEST_ISO_FILE"
                 BOOT_METHOD="casper"
@@ -1023,17 +1072,22 @@ for RELEASE in $RELEASES_LIST ; do
   fi
 
   # Mark distrib:codename as processed
-  echo "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" || PROCESSED_RELEASES_LIST="$PROCESSED_RELEASES_LIST $DISTRIB:$CODENAME"
+  if ! printf "%s" "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" ; then
+    [ -z "$PROCESSED_RELEASES_LIST" ] && PROCESSED_RELEASES_LIST="$DISTRIB:$CODENAME" || PROCESSED_RELEASES_LIST="$PROCESSED_RELEASES_LIST $DISTRIB:$CODENAME"
+  fi
   print_debug_var "PROCESSED_RELEASES_LIST"
 
   # Mark distrib as processed
-  echo "$PROCESSED_DISTRIBS_LIST" | grep -q "$DISTRIB" || PROCESSED_DISTRIBS_LIST="$PROCESSED_DISTRIBS_LIST $DISTRIB"
+  if ! printf "%s" "$PROCESSED_DISTRIBS_LIST" | grep -q "$DISTRIB" ; then
+    [ -z "$PROCESSED_DISTRIBS_LIST" ] && PROCESSED_DISTRIBS_LIST="$DISTRIB" || PROCESSED_DISTRIBS_LIST="$PROCESSED_DISTRIBS_LIST $DISTRIB"
+  fi
   print_debug_var "PROCESSED_DISTRIBS_LIST"
 
-  # If this is the main release, mark it as OK
+  # If this is the main release, mark it as OK and set ARCH_MAIN
   if [ "$RELEASE" = "$RELEASE_MAIN" ] ; then
     RELEASE_MAIN_OK=1
-    print_debug_var "RELEASE_MAIN_OK"
+    ARCH_MAIN="$RELEASE_ARCH_MAIN"
+    print_debug_var "RELEASE_MAIN_OK" "ARCH_MAIN"
   fi
   
   print_verbose "Finished processing release: $DISTRIB $CODENAME" 
@@ -1325,7 +1379,7 @@ if [ $RELEASE_MAIN_OK -eq 1 ] ; then
     print_debug_var "RELEASE_MAIN_DIR"
 
     # Link EFI files
-    for EFI_BOOT_FILE in $(find -H "$PXE_ROOT_DIR/$RELEASE_MAIN_DIR" -maxdepth 2 -type f -name "bootnet*") ; do
+    for EFI_BOOT_FILE in $(find -H "$PXE_ROOT_DIR/$RELEASE_MAIN_DIR" -maxdepth 2 -type f -name "bootnet*.efi" -o -name "grub*.efi") ; do
       print_debug_var "EFI_BOOT_FILE"
       print_verbose "Creating symlink to EFI file ${EFI_BOOT_FILE#$PXE_ROOT_DIR/} in $PXE_ROOT_DIR"
       ln -sf "${EFI_BOOT_FILE#$PXE_ROOT_DIR/}" "$PXE_ROOT_DIR"
