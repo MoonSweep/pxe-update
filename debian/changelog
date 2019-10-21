@@ -1,3 +1,21 @@
+pxe-update (1.2-1) unstable; urgency=medium
+
+  * New upstream version 1.2:
+  * [fd79eff] Use dpkg --compare-versions to compare release versions
+  * [cdf77c8] Check remote release directories instead of netboot directories
+  * [8c59a04] Add function names in error messages
+  * [5f07087] Add remote dir check in function mirror_remote_dir
+  * [584fc20] Fix abort_loop function and calls
+  * [9081048] Fix architectures processing
+  * [bde1a90] Fix handling of PROCESSED_RELEASES_LIST / PROCESSED_DISTRIBS_LIST
+  * [f141cef] Fix EFI boot files linking
+
+  * Packaging changes:
+  * [7e8cce8] Add dependency on dpkg (>= 1.2.1)
+  * [3d1d6e5] Bump debhelper compatibility level to 12
+
+ -- Raphaël Halimi <raphael.halimi@gmail.com>  Mon, 21 Oct 2019 14:12:10 +0200
+
 pxe-update (1.1-1) unstable; urgency=medium
 
   * New upstream version 1.1:
