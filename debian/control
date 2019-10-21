@@ -11,7 +11,7 @@ Vcs-Git: https://github.com/MoonSweep/pxe-update.git
 
 Package: pxe-update
 Architecture: all
-Depends: adduser, lftp, shell-script-helper, ${misc:Depends}
+Depends: adduser, lftp, shell-script-helper, dpkg (>= 1.2.1), ${misc:Depends}
 Recommends: fuseiso, rsync, imagemagick, tftpd-hpa | atftpd
 Description: Automate maintenance of a PXE server
  pxe-update is a shell script to automate maintenance of a PXE server. It's
