@@ -551,8 +551,10 @@ for RELEASE in $RELEASES_LIST ; do
     # Check available architectures
     RELEASE_ARCH_AVAILABLE_LIST=""
     for ARCH in $ARCH_LIST ; do
+      LEGACY=""
       if [ "$DISTRIB" != "mint" ] ; then
-        CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
+        ( [ "$DISTRIB" = "ubuntu" ] && ( [ "$VERSION" = "0.1" ] || compare_versions "$VERSION" ge 20.04 ) ) && LEGACY="legacy-"
+        CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/${LEGACY}images/netboot"
         PRINT_NETBOOT=" netboot"
       else
         CHECK_DIR="$BASE_URL/dists/$CODENAME/main/binary-$ARCH"
@@ -615,7 +617,7 @@ for RELEASE in $RELEASES_LIST ; do
       if [ "$DISTRIB" != "mint" ] ; then
 
         # Mirror netboot directory
-        NETBOOT_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
+        NETBOOT_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/${LEGACY}images/netboot"
         print_debug_var "NETBOOT_DIR"
         mirror_remote_dir "$NETBOOT_DIR/$DISTRIB-installer/$ARCH" "$WORK_DIR" || continue
 
