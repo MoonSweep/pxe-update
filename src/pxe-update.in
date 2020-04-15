@@ -481,7 +481,13 @@ for RELEASE in $RELEASES_LIST ; do
 
       check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
       if [ $? -ne 0 ] ; then
-        abort_loop "couldn't find release directory" || continue
+        print_verbose "Couldn't find release directory on regular server, trying archive server"
+        BASE_URL="http://old-releases.ubuntu.com"
+        print_debug_var "BASE_URL"
+        check_remote_dir "$BASE_URL/$DISTRIB/dists/$CODENAME"
+        if [ $? -ne 0 ] ; then
+          abort_loop "couldn't find release directory" || continue
+        fi
       fi
 
       delete_files "$RELEASE_FILE"
