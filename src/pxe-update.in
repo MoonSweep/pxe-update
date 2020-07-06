@@ -864,7 +864,7 @@ for RELEASE in $RELEASES_LIST ; do
               LATEST_ISO_FILE="$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-desktop-$ARCH.iso"
               LATEST_ISO_URL="$LIVE_MIRROR_UBUNTU/$CODENAME/$LATEST_ISO_FILE"
               BOOT_METHOD="casper"
-              APPEND_OPTIONS=""
+              APPEND_OPTIONS="ip=dhcp"
               ;;
 
             mint)
@@ -882,7 +882,7 @@ for RELEASE in $RELEASES_LIST ; do
                 LATEST_ISO_FILE="linux$DISTRIB-$VERSION-$DESKTOP$DVD_SUFFIX-$MINT_ARCH.iso"
                 LATEST_ISO_URL="$LIVE_MIRROR_MINT/stable/$VERSION/$LATEST_ISO_FILE"
                 BOOT_METHOD="casper"
-                APPEND_OPTIONS=""
+                APPEND_OPTIONS="ip=dhcp"
               fi
               ;;
 
