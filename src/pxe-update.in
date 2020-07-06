@@ -1081,7 +1081,7 @@ for RELEASE in $RELEASES_LIST ; do
 
   # Mark distrib:codename as processed
   if ! printf "%s" "$PROCESSED_RELEASES_LIST" | grep -q "$DISTRIB:$CODENAME" ; then
-    [ -z "$PROCESSED_RELEASES_LIST" ] && PROCESSED_RELEASES_LIST="$DISTRIB:$CODENAME" || PROCESSED_RELEASES_LIST="$PROCESSED_RELEASES_LIST $DISTRIB:$CODENAME"
+    [ -z "$PROCESSED_RELEASES_LIST" ] && PROCESSED_RELEASES_LIST="$DISTRIB:$CODENAME:$RELEASE_ARCH_MAIN" || PROCESSED_RELEASES_LIST="$PROCESSED_RELEASES_LIST $DISTRIB:$CODENAME:$RELEASE_ARCH_MAIN"
   fi
   print_debug_var "PROCESSED_RELEASES_LIST"
 
@@ -1156,8 +1156,11 @@ for DISTRIB in $PROCESSED_DISTRIBS_LIST ; do
 
   # Get stdmenu.cfg file from first DISTRIB release
   for RELEASE in $PROCESSED_RELEASES_LIST ; do
-    if [ "${RELEASE%:*}" = "$DISTRIB" ] ; then
-      STDMENU_FILE="dists/$DISTRIB/${RELEASE#*:}/$ARCH_MAIN/boot-screens/stdmenu.cfg"
+    RELEASE_DISTRIB="$(printf "%s" "$RELEASE" | cut -d : -f 1)"
+    RELEASE_CODENAME="$(printf "%s" "$RELEASE" | cut -d : -f 2)"
+    RELEASE_ARCH="$(printf "%s" "$RELEASE" | cut -d : -f 3)"
+    if [ "$RELEASE_DISTRIB" = "$DISTRIB" ] ; then
+      STDMENU_FILE="dists/$DISTRIB/$RELEASE_CODENAME/$RELEASE_ARCH/boot-screens/stdmenu.cfg"
       break
     fi
   done
