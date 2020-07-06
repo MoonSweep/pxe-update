@@ -82,9 +82,9 @@ print_usage () {
   printf "DISTRIBUTION, followed by a colon, followed by a CODENAME or a SUITE.\n"
   printf "\nDISTRIBUTION can be \"debian\", \"ubuntu\" or \"mint\".\n"
   printf "CODENAME is a one-word release codename like \"wheezy\", \"raring\" or \"sarah\"\n"
-  printf "SUITE is a suite name like \"stable\" or \"devel\". Valid suite names are:\n"
+  printf "SUITE is a suite name like \"stable\" or \"lts\". Valid suite names are:\n"
   printf "\nDebian: \"stable\", \"testing\", \"unstable\" \"oldstable\" and \"oldoldstable\".\n"
-  printf "Ubuntu: \"stable\", \"devel\" (or \"unstable\"), \"oldstable\", \"lts\" and \"oldlts\".\n"
+  printf "Ubuntu: \"stable\", \"oldstable\", \"lts\" and \"oldlts\".\n"
   printf "Mint: \"stable\" and \"lmde\".\n"
 }
 
@@ -112,6 +112,7 @@ find_remote_latest_file () {
 
 # Check if remote directory exists: <URL>
 check_remote_dir () {
+  [ -z "$1" ] && return 1
   print_verbose "Checking $1"
   $LFTP_BIN -c "cd $1" > /dev/null 2>&1
 }
@@ -454,34 +455,27 @@ for RELEASE in $RELEASES_LIST ; do
         print_debug_var "UBUNTU_STABLE" "UBUNTU_STABLE_VERSION" "UBUNTU_LTS" "UBUNTU_OLDSTABLE" "UBUNTU_OLDLTS"
       fi
 
-      # For Ubuntu devel, set bogus version to list it at the end
+      # Ubuntu devel is not supported anymore
       if [ "$CODENAME" = "devel" ] || [ "$CODENAME" = "unstable" ] || [ "$CODENAME" = "$UBUNTU_DEVEL" ] ; then
         CODENAME="$UBUNTU_DEVEL"
         CODENAME_FULL=$(echo "$CODENAME" | sed -e "s/^./\u&/")
         VERSION="0.1"
         SUITE="devel"
-
-        # We need this because Ubuntu rolls back some versions prior to creating a new devel distro
-        if compare_versions "$UBUNTU_DEVEL_VERSION" le "$UBUNTU_STABLE_VERSION" ; then
-          delete_files "$PXE_ROOT_DIR/dists/$DISTRIB/$SUITE"
-          abort_loop "New Ubuntu stable version released recently, devel version not available yet" || continue
-        fi
-
-      else
-
-        case "$CODENAME" in
-          stable|"$UBUNTU_STABLE")
-            CODENAME="$UBUNTU_STABLE" ; SUITE="stable" ;;
-          oldstable|"$UBUNTU_OLDSTABLE")
-            CODENAME="$UBUNTU_OLDSTABLE" ; SUITE="oldstable" ;;
-          lts|"$UBUNTU_LTS")
-            CODENAME="$UBUNTU_LTS" ; SUITE="lts" ;;
-          oldlts|"$UBUNTU_OLDLTS")
-            CODENAME="$UBUNTU_OLDLTS" ; SUITE="oldlts" ;;
-        esac
-        CODENAME_FULL=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*(//" -e "s/).*$//")
-        VERSION=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*Ubuntu //" -e "s/ (.*$//")
+        abort_loop "Ubuntu devel not supported anymore" || continue
       fi
+
+      case "$CODENAME" in
+        stable|"$UBUNTU_STABLE")
+          CODENAME="$UBUNTU_STABLE" ; SUITE="stable" ;;
+        oldstable|"$UBUNTU_OLDSTABLE")
+          CODENAME="$UBUNTU_OLDSTABLE" ; SUITE="oldstable" ;;
+        lts|"$UBUNTU_LTS")
+          CODENAME="$UBUNTU_LTS" ; SUITE="lts" ;;
+        oldlts|"$UBUNTU_OLDLTS")
+          CODENAME="$UBUNTU_OLDLTS" ; SUITE="oldlts" ;;
+      esac
+      CODENAME_FULL=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*(//" -e "s/).*$//")
+      VERSION=$(grep "$CODENAME" "$RELEASE_FILE" | head -n 1 | sed -e "s/^.*Ubuntu //" -e "s/ (.*$//")
 
       print_debug_var "CODENAME" "CODENAME_FULL" "VERSION" "SUITE"
 
@@ -558,49 +552,69 @@ for RELEASE in $RELEASES_LIST ; do
     RELEASE_ARCH_AVAILABLE_LIST=""
     for ARCH in $ARCH_LIST ; do
       LEGACY=""
-      if [ "$DISTRIB" != "mint" ] ; then
-        ( [ "$DISTRIB" = "ubuntu" ] && ( [ "$VERSION" = "0.1" ] || compare_versions "$VERSION" ge 20.04 ) ) && LEGACY="legacy-"
-        CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/${LEGACY}images/netboot"
-        PRINT_NETBOOT=" netboot"
-      else
-        CHECK_DIR="$BASE_URL/dists/$CODENAME/main/binary-$ARCH"
+      PRINT_NETBOOT=" netboot"
+      if [ "$DISTRIB" = "debian" ] ; then
+        # Debian supports every arch with every release, no fuss
+        CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
+      elif [ "$DISTRIB" = "ubuntu" ] ; then
+        # Ubuntu supported every arch until 20.04, called the netboot images "legacy-images" for 20.04, and discontinued support afterwards
+        if compare_versions "$VERSION" eq "20.04" ; then
+          LEGACY="legacy-"
+          CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/${LEGACY}images/netboot"
+        elif compare_versions "$VERSION" ge 20.10 ; then
+          CHECK_DIR=""
+        else
+          CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
+        fi
+      elif [ "$DISTRIB" = "mint" ] ; then
+        # Mint discontinued i386 support from 20
+        if ( [ "$ARCH" = "i386" ] && compare_versions "$VERSION" ge 20 ) ; then
+          CHECK_DIR=""
+        else
+          CHECK_DIR="$BASE_URL/dists/$CODENAME/main/binary-$ARCH"
+        fi
         PRINT_NETBOOT=""
       fi
       check_remote_dir "$CHECK_DIR"
       if [ $? -eq 0 ] ; then
         [ -z "$RELEASE_ARCH_AVAILABLE_LIST" ] && RELEASE_ARCH_AVAILABLE_LIST="$ARCH" || RELEASE_ARCH_AVAILABLE_LIST="$RELEASE_ARCH_AVAILABLE_LIST $ARCH"
-        print_debug_var "RELEASE_ARCH_AVAILABLE_LIST"
       fi
+      print_debug_var "RELEASE_ARCH_AVAILABLE_LIST"
     done
 
-    print_verbose "Available$PRINT_NETBOOT architectures for $DISTRIB $CODENAME: $RELEASE_ARCH_AVAILABLE_LIST"
+    if [ -n "$RELEASE_ARCH_AVAILABLE_LIST" ] ; then
+      print_verbose "Available$PRINT_NETBOOT architectures for $DISTRIB $CODENAME: $RELEASE_ARCH_AVAILABLE_LIST"
 
-    # Select main architecture for this release
-    for ARCH_AVAILABLE in $RELEASE_ARCH_AVAILABLE_LIST ; do
-      RELEASE_ARCH_MAIN="$ARCH_AVAILABLE"
-      print_debug_var "RELEASE_ARCH_MAIN"
-      break
-    done
+      # Select main architecture for this release
+      RELEASE_ARCH_MAIN=""
+      for ARCH_AVAILABLE in $RELEASE_ARCH_AVAILABLE_LIST ; do
+        RELEASE_ARCH_MAIN="$ARCH_AVAILABLE"
+        print_debug_var "RELEASE_ARCH_MAIN"
+        break
+      done
 
-    print_verbose "Main$PRINT_NETBOOT architecture for $DISTRIB $CODENAME: $RELEASE_ARCH_MAIN"
+      print_verbose "Main$PRINT_NETBOOT architecture for $DISTRIB $CODENAME: $RELEASE_ARCH_MAIN"
 
-    # Release menu file starts here
-    CODENAME_MENU_FILE="$BOOT_SCREENS_DIR/$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-${CODENAME}.cfg"
-    CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$RELEASE_ARCH_MAIN/boot-screens/stdmenu.cfg"
-    if ( [ "$SUITE" = "testing" ] || [ "$SUITE" = "unstable" ] || [ "$SUITE" = "devel" ] ) ; then
-      DISPLAYED_VERSION="$SUITE"
+      # Release menu file starts here
+      CODENAME_MENU_FILE="$BOOT_SCREENS_DIR/$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-${CODENAME}.cfg"
+      CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$RELEASE_ARCH_MAIN/boot-screens/stdmenu.cfg"
+      if ( [ "$SUITE" = "testing" ] || [ "$SUITE" = "unstable" ] ) ; then
+        DISPLAYED_VERSION="$SUITE"
+      else
+        DISPLAYED_VERSION="$VERSION"
+      fi
+      CODENAME_LABEL="$DISTRIB_FULL $DISPLAYED_VERSION (^$CODENAME_FULL)"
+      print_debug_var "CODENAME_MENU_FILE" "DISPLAYED_VERSION" "CODENAME_LABEL"
+      print_verbose "Creating $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
+      printf "%s\n%s\n%s\n%s\n" \
+        "INCLUDE $CODENAME_STDMENU_FILE" \
+        "MENU LABEL $CODENAME_LABEL" \
+        "MENU TITLE $(echo "$CODENAME_LABEL" | tr -d ^)" \
+        "MENU TABMSG Please select an architecture" \
+        > "$CODENAME_MENU_FILE"
     else
-      DISPLAYED_VERSION="$VERSION"
+      print_verbose "No available$PRINT_NETBOOT architecture for $DISTRIB $CODENAME"
     fi
-    CODENAME_LABEL="$DISTRIB_FULL $DISPLAYED_VERSION (^$CODENAME_FULL)"
-    print_debug_var "CODENAME_MENU_FILE" "DISPLAYED_VERSION" "CODENAME_LABEL"
-    print_verbose "Creating $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
-    printf "%s\n%s\n%s\n%s\n" \
-      "INCLUDE $CODENAME_STDMENU_FILE" \
-      "MENU LABEL $CODENAME_LABEL" \
-      "MENU TITLE $(echo "$CODENAME_LABEL" | tr -d ^)" \
-      "MENU TABMSG Please select an architecture" \
-      > "$CODENAME_MENU_FILE"
 
     # Loop through architectures for this release
     for ARCH in $RELEASE_ARCH_AVAILABLE_LIST ; do
@@ -802,9 +816,7 @@ for RELEASE in $RELEASES_LIST ; do
             ;;
 
           ubuntu)
-            if [ "$SUITE" = "devel" ] ; then
-              print_verbose "Live images not supported for $DISTRIB $SUITE, skipping ISO processing."
-            elif [ "$ARCH" = "i386" ] && compare_versions "$VERSION" ge 17.10 ; then
+            if [ "$ARCH" = "i386" ] && compare_versions "$VERSION" ge 17.10 ; then
               print_verbose "$DISTRIB_FULL stopped releasing live Desktop images on $ARCH architecture since 17.10, skipping ISO processing."
             else
               DESKTOP_LIST="$LIVE_DESKTOP_LIST_UBUNTU"
