@@ -104,6 +104,12 @@ get_remote_file () {
   fi
 }
 
+# Find the latest file in a remote directory: <URL> <pattern>
+find_remote_latest_file () {
+  # TODO Remove 2>/dev/null ? It's here to remove redirection messages
+  $LFTP_BIN -c "connect $1/ ; cls -1" 2>/dev/null | sed -n -E "/$2/{ s,[/@]$,, ; p }" | tail -n 1
+}
+
 # Check if remote directory exists: <URL>
 check_remote_dir () {
   print_verbose "Checking $1"
@@ -782,20 +788,11 @@ for RELEASE in $RELEASES_LIST ; do
               else
                 DEBIAN_ISO_SUBDIR="archive/"
               fi
-              DEBIAN_ISO_PATCHLEVEL=""
-              PATCHLEVEL_FOUND=0
-              COUNTER=0
-              while [ $COUNTER -le 99 ] ; do
-                check_remote_dir "$LIVE_MIRROR_DEBIAN/cdimage$NONFREE_SUBDIR/$DEBIAN_ISO_SUBDIR$VERSION.$COUNTER-live$NONFREE_SUFFIX"
-                if [ $? -eq 0 ] ; then
-                  PATCHLEVEL_FOUND=1
-                  DEBIAN_ISO_PATCHLEVEL=".$COUNTER"
-                else
-                  [ $PATCHLEVEL_FOUND -eq 1 ] && break
-                fi
-                COUNTER=$((COUNTER+1))
-              done
-              if [ $PATCHLEVEL_FOUND -eq 1 ] ; then
+              DEBIAN_ISO_DIR_URL="$LIVE_MIRROR_DEBIAN/cdimage$NONFREE_SUBDIR/$DEBIAN_ISO_SUBDIR"
+              # Find patchlevel
+              DEBIAN_ISO_PATCHLEVEL="$(find_remote_latest_file "$DEBIAN_ISO_DIR_URL" "$VERSION.*-live" | sed -E "s,[0-9]+\.[0-9]+\.([0-9]+)-.*$,\1,")"
+              if [ -n "$DEBIAN_ISO_PATCHLEVEL" ] ; then
+                print_verbose "Patch level found: $DEBIAN_ISO_PATCHLEVEL"
                 if compare_versions "$VERSION" lt 8 ; then
                   DESKTOP_LIST="$LIVE_DESKTOP_LIST_DEBIAN_7"
                 elif compare_versions "$VERSION" lt 9 ; then
@@ -850,8 +847,8 @@ for RELEASE in $RELEASES_LIST ; do
           case "$DISTRIB" in
 
             debian)
-              LATEST_ISO_FILE="$DISTRIB-live-$VERSION$DEBIAN_ISO_PATCHLEVEL-$ARCH-$DESKTOP$NONFREE_SUFFIX.iso"
-              LATEST_ISO_URL="$LIVE_MIRROR_DEBIAN/cdimage$NONFREE_SUBDIR/$DEBIAN_ISO_SUBDIR$VERSION$DEBIAN_ISO_PATCHLEVEL-live$NONFREE_SUFFIX/$ARCH/iso-hybrid/$LATEST_ISO_FILE"
+              LATEST_ISO_FILE="$DISTRIB-live-$VERSION.$DEBIAN_ISO_PATCHLEVEL-$ARCH-$DESKTOP$NONFREE_SUFFIX.iso"
+              LATEST_ISO_URL="$DEBIAN_ISO_DIR_URL/$VERSION.$DEBIAN_ISO_PATCHLEVEL-live$NONFREE_SUFFIX/$ARCH/iso-hybrid/$LATEST_ISO_FILE"
               BOOT_METHOD="live"
               if compare_versions "$VERSION" ge 8 ; then
                 APPEND_OPTIONS="components"
@@ -869,7 +866,7 @@ for RELEASE in $RELEASES_LIST ; do
 
             mint)
               if [ "$SUITE" = "LMDE" ] ; then
-                LATEST_ISO_FILE="lmde-2-201503-$DESKTOP-$MINT_ARCH.iso"
+                LATEST_ISO_FILE="$(find_remote_latest_file "$LIVE_MIRROR_MINT/debian/" "$DESKTOP-$MINT_ARCH.iso$")"
                 LATEST_ISO_URL="$LIVE_MIRROR_MINT/debian/$LATEST_ISO_FILE"
                 BOOT_METHOD="live"
                 APPEND_OPTIONS="config"
