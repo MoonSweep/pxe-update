@@ -1089,7 +1089,7 @@ for RELEASE in $RELEASES_LIST ; do
     ARCH_MAIN="$RELEASE_ARCH_MAIN"
     print_debug_var "RELEASE_MAIN_OK" "ARCH_MAIN"
   fi
-  
+
   print_verbose "Finished processing release: $DISTRIB $CODENAME" 
 
 done
