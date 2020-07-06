@@ -587,18 +587,13 @@ for RELEASE in $RELEASES_LIST ; do
     # Release menu file starts here
     CODENAME_MENU_FILE="$BOOT_SCREENS_DIR/$DISTRIB-$(echo "$VERSION" | cut -d " " -f 1)-${CODENAME}.cfg"
     CODENAME_STDMENU_FILE="dists/$DISTRIB/$CODENAME/$RELEASE_ARCH_MAIN/boot-screens/stdmenu.cfg"
-    if ( [ "$DISTRIB" = "mint" ] && [ "$SUITE" = "LMDE" ] ) ; then
-      SPLASH_EXT="jpg"
-    else
-      SPLASH_EXT="png"
-    fi
     if ( [ "$SUITE" = "testing" ] || [ "$SUITE" = "unstable" ] || [ "$SUITE" = "devel" ] ) ; then
       DISPLAYED_VERSION="$SUITE"
     else
       DISPLAYED_VERSION="$VERSION"
     fi
     CODENAME_LABEL="$DISTRIB_FULL $DISPLAYED_VERSION (^$CODENAME_FULL)"
-    print_debug_var "CODENAME_MENU_FILE" "SPLASH_EXT" "DISPLAYED_VERSION" "CODENAME_LABEL"
+    print_debug_var "CODENAME_MENU_FILE" "DISPLAYED_VERSION" "CODENAME_LABEL"
     print_verbose "Creating $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
     printf "%s\n%s\n%s\n%s\n" \
       "INCLUDE $CODENAME_STDMENU_FILE" \
@@ -997,12 +992,12 @@ for RELEASE in $RELEASES_LIST ; do
               print_verbose "Creating $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
               printf "" > $CODENAME_ORIG_TXT_MENU_FILE
 
-              print_verbose "Copying $DISTRIB splash screen $LIVE_CONTENTS_WORKDIR/isolinux/splash.$SPLASH_EXT to $WORK_DIR/boot-screens"
-              cp -af "$LIVE_CONTENTS_WORKDIR/isolinux/splash.$SPLASH_EXT" "$WORK_DIR/boot-screens"
+              print_verbose "Copying $DISTRIB splash screen $LIVE_CONTENTS_WORKDIR/isolinux/splash.png to $WORK_DIR/boot-screens"
+              cp -af "$LIVE_CONTENTS_WORKDIR/isolinux/splash.png" "$WORK_DIR/boot-screens"
 
               print_verbose "Creating $DISTRIB $CODENAME standard menu file $WORK_DIR/boot-screens/stdmenu.cfg"
               printf "%s\n%s\n" \
-                "MENU BACKGROUND dists/$DISTRIB/$CODENAME/$ARCH/boot-screens/splash.$SPLASH_EXT" \
+                "MENU BACKGROUND dists/$DISTRIB/$CODENAME/$ARCH/boot-screens/splash.png" \
                 "MENU VSHIFT 6" \
                 > "$WORK_DIR/boot-screens/stdmenu.cfg"
             fi
