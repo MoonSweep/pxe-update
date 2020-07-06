@@ -981,7 +981,8 @@ for RELEASE in $RELEASES_LIST ; do
               "LABEL $DISTRIB-$CODENAME-$ARCH-live-$DESKTOP" \
               "MENU LABEL ^$DESKTOP_FULL" \
               "KERNEL dists/$DISTRIB/$CODENAME/$ARCH/livecd/$DESKTOP/$(basename "$KERNEL")" \
-              "APPEND root=/dev/nfs boot=$BOOT_METHOD netboot=nfs nfsroot=$LIVE_NFS_SERVER_IP:$LIVE_NFS_SERVER_DIR/$DISTRIB/$CODENAME/$ARCH/$DESKTOP $LIVE_LOCALIZATION_OPTIONS initrd=dists/$DISTRIB/$CODENAME/$ARCH/livecd/$DESKTOP/$(basename "$INITRD") $APPEND_OPTIONS --" \
+              "INITRD dists/$DISTRIB/$CODENAME/$ARCH/livecd/$DESKTOP/$(basename "$INITRD")" \
+              "APPEND root=/dev/nfs boot=$BOOT_METHOD netboot=nfs nfsroot=$LIVE_NFS_SERVER_IP:$LIVE_NFS_SERVER_DIR/$DISTRIB/$CODENAME/$ARCH/$DESKTOP $LIVE_LOCALIZATION_OPTIONS $APPEND_OPTIONS --" \
               >> "$CODENAME_LIVE_MENU_FILE"
 
             # Mint doesn't provide netboot installer, so we have to create and/or copy missing files
