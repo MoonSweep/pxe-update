@@ -558,7 +558,7 @@ for RELEASE in $RELEASES_LIST ; do
         CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/images/netboot"
       elif [ "$DISTRIB" = "ubuntu" ] ; then
         # Ubuntu supported every arch until 20.04, called the netboot images "legacy-images" for 20.04, and discontinued support afterwards
-        if compare_versions "$VERSION" eq "20.04" ; then
+        if compare_versions "$VERSION" ge "20.04" && compare_versions "$VERSION" lt "20.10" ; then
           LEGACY="legacy-"
           CHECK_DIR="$BASE_URL/$DISTRIB/dists/$CODENAME/main/installer-$ARCH/current/${LEGACY}images/netboot"
         elif compare_versions "$VERSION" ge 20.10 ; then
