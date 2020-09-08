@@ -442,7 +442,7 @@ for RELEASE in $RELEASES_LIST ; do
       # I don't like the idea to rely on parsing a web page, but with Ubuntu I didn't find anything better
       get_remote_file "http://releases.ubuntu.com" "$RELEASE_FILE"
       if [ -z "$UBUNTU_STABLE" ] ; then
-        UBUNTU_RELEASES="$(grep "p-heading--four" "$RELEASE_FILE" | sed -E "s/^.*a href=\"([a-z]+)\/.*>Ubuntu ([0-9\.]+( LTS)*).*$/\2:\1/" | sort -n)"
+        UBUNTU_RELEASES="$(grep "p-heading--four" "$RELEASE_FILE" | sed -E "/<!--/d; s/^.*a href=\"([a-z]+)\/.*>Ubuntu ([0-9\.]+( LTS)*).*$/\2:\1/" | sort -n)"
         UBUNTU_RELEASES_LTS="$(printf "%s" "$UBUNTU_RELEASES" | grep "LTS")"
         #UBUNTU_RELEASES_ESM="$(grep "p-heading--five" "$RELEASE_FILE" | sed -E "s/^.*a href=\"([a-z]+)\/.*>Ubuntu ([0-9\.]+( LTS)*).*$/\2:\1/" | sort -n)"
         UBUNTU_STABLE="$(printf "%s" "$UBUNTU_RELEASES" | tail -n 1 | cut -d : -f 2)"
