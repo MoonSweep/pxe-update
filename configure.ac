@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([pxe-update], [1.2], [raphael.halimi@gmail.com])
+AC_INIT([pxe-update], [1.3], [raphael.halimi@gmail.com])
 AM_INIT_AUTOMAKE([1.11 foreign silent-rules subdir-objects])
 AM_MAINTAINER_MODE
 

@@ -80,7 +80,7 @@ http://packages.linuxmint.org, like \fBwheezy\fR, \fBraring\fR or \fBsarah\fR.
 
 .TP
 .I SUITE
-A suite name like \fBstable\fR or \fBdevel\fR. Actually, only Debian uses suite
+A suite name like \fBstable\fR or \fBlts\fR. Actually, only Debian uses suite
 names, but the script uses some hacks to also assign suite names to Ubuntu and
 Mint releases. Valid suite names are:
 
@@ -89,8 +89,7 @@ Mint releases. Valid suite names are:
 For Debian: \fBstable\fR, \fBtesting\fR, \fBunstable\fR, \fBoldstable\fR and
 \fBoldoldstable\fR.
 .IP
-For Ubuntu: \fBstable\fR, \fBdevel\fR (or \fBunstable\fR), \fBoldstable\fR,
-\fBlts\fR and \fBoldlts\fR.
+For Ubuntu: \fBstable\fR, \fBoldstable\fR, \fBlts\fR and \fBoldlts\fR.
 .IP
 For Mint: \fBstable\fR and \fBlmde\fR.
 .PD
