@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: Raphaël Halimi <raphael.halimi@gmail.com>
 Build-Depends: debhelper-compat (= 12)
-Standards-Version: 4.3.0
+Standards-Version: 4.5.1
 Rules-Requires-Root: no
 Homepage: https://github.com/MoonSweep/pxe-update
 Vcs-Browser: https://github.com/MoonSweep/pxe-update.git
