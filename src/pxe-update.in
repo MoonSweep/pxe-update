@@ -695,16 +695,18 @@ for RELEASE in $RELEASES_LIST ; do
 
       # Release menu file continues here
       CODENAME_ORIG_TXT_MENU_FILE="$WORK_DIR/boot-screens/menu.cfg"
-      print_verbose "Appending $ARCH entry to $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
-      ARCH_LONGNAME="$(grep -A 1 "<td>.*$ARCH.*<\/td>$" $PORTS_FILE | head -n 2 | tail -n 1 | sed -e "s/^<td>//" -e "s/<\/td>$//" -e "s/ *($ARCH)$//")"
-      print_debug_var "ARCH_LONGNAME"
-      printf "%s\n\t%s\n\t%s\n\t%s\n%s\n" \
-        "MENU BEGIN $DISTRIB-$CODENAME-$ARCH" \
-        "MENU LABEL $ARCH_LONGNAME (^$ARCH)" \
-        "MENU MARGIN 10" \
-        "INCLUDE ${CODENAME_ORIG_TXT_MENU_FILE#$PXE_ROOT_DIR/}" \
-        "MENU END" \
-        >> "$CODENAME_MENU_FILE"
+      if [ -e "$CODENAME_ORIG_TXT_MENU_FILE" ] ; then
+        print_verbose "Appending $ARCH entry to $DISTRIB $CODENAME menu file $CODENAME_MENU_FILE"
+        ARCH_LONGNAME="$(grep -A 1 "<td>.*$ARCH.*<\/td>$" $PORTS_FILE | head -n 2 | tail -n 1 | sed -e "s/^<td>//" -e "s/<\/td>$//" -e "s/ *($ARCH)$//")"
+        print_debug_var "ARCH_LONGNAME"
+        printf "%s\n\t%s\n\t%s\n\t%s\n%s\n" \
+          "MENU BEGIN $DISTRIB-$CODENAME-$ARCH" \
+          "MENU LABEL $ARCH_LONGNAME (^$ARCH)" \
+          "MENU MARGIN 10" \
+          "INCLUDE ${CODENAME_ORIG_TXT_MENU_FILE#$PXE_ROOT_DIR/}" \
+          "MENU END" \
+          >> "$CODENAME_MENU_FILE"
+      fi
 
       # GTK Installer
       if [ $NETBOOT_AVAILABLE -eq 1 ] ; then
@@ -760,19 +762,23 @@ for RELEASE in $RELEASES_LIST ; do
 
           # Append back menu entry to GTK menu file
           CODENAME_ORIG_GTK_MENU_FILE="$WORK_DIR/gtk/boot-screens/menu.cfg"
-          print_verbose "Appending exit entry to $DISTRIB $CODENAME $ARCH GTK menu file $CODENAME_ORIG_GTK_MENU_FILE"
-          printf "%s\n" \
-            "INCLUDE boot-screens/back.cfg" \
-            >> "$CODENAME_ORIG_GTK_MENU_FILE"
+          if [ -e "$CODENAME_ORIG_GTK_MENU_FILE" ] ; then
+            print_verbose "Appending exit entry to $DISTRIB $CODENAME $ARCH GTK menu file $CODENAME_ORIG_GTK_MENU_FILE"
+            printf "%s\n" \
+              "INCLUDE boot-screens/back.cfg" \
+              >> "$CODENAME_ORIG_GTK_MENU_FILE"
+          fi
 
           # Append GTK menu file to arch menu file
-          print_verbose "Appending GTK menu file to $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
-          printf "%s\n\t%s\n\t%s\n%s\n" \
-            "MENU BEGIN $DISTRIB-$CODENAME-$ARCH-gtk" \
-            "MENU LABEL ^Graphical Installer" \
-            "INCLUDE ${CODENAME_ORIG_GTK_MENU_FILE#$PXE_ROOT_DIR/}" \
-            "MENU END" \
-            >> "$CODENAME_ORIG_TXT_MENU_FILE"
+          if [ -e "$CODENAME_ORIG_TXT_MENU_FILE" ] ; then
+            print_verbose "Appending GTK menu file to $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
+            printf "%s\n\t%s\n\t%s\n%s\n" \
+              "MENU BEGIN $DISTRIB-$CODENAME-$ARCH-gtk" \
+              "MENU LABEL ^Graphical Installer" \
+              "INCLUDE ${CODENAME_ORIG_GTK_MENU_FILE#$PXE_ROOT_DIR/}" \
+              "MENU END" \
+              >> "$CODENAME_ORIG_TXT_MENU_FILE"
+          fi
 
         fi
 
