@@ -1,3 +1,28 @@
+pxe-update (1.3-1) unstable; urgency=medium
+
+  * [6123437] Fix trailing space
+  * [563354a] Add support for Ubuntu old releases
+  * [4b35d4f] Add support for Ubuntu Legacy Server Installer
+  * [f1c9987] Add per-release main architecture
+  * [d195a77] Add "ip=dhcp" to casper-based ISO boot
+  * [61f191e] Add function find_remote_latest_file
+  * [07520ec] Remove obsolete JPG splash screen support for Mint LMDE
+  * [d33ab61] Use INITRD Syslinux option instead of kernel parameter
+  * [48f7365] Discontinue Ubuntu devel support and netboot from Groovy+
+  * [1019b38] Fix support for Ubuntu Legacy Server Installer
+  * [929079c] Ignore commented entries in Ubuntu releases page
+  * [6b6dba8] Enforce GNU sed
+  * [8515041] Use NETBOOT_AVILABLE variable to replace some quirks
+  * [f0df58b] Fix ISO-only distros handling
+  * [2443041] Update Ubuntu quirks
+  * [3270317] Update Mint quirks
+  * [a47db65] Disable lftp's broken SSL certificate verification
+  * [9b13c59] Prepare build tree for release v1.3
+  * [403efa1] Bump Standards-Version to 4.5.1
+  * [12fb11b] Drop unused lintian overrides
+
+ -- Raphaël Halimi <raphael.halimi@gmail.com>  Thu, 07 Oct 2021 12:27:31 +0200
+
 pxe-update (1.2-1) unstable; urgency=medium
 
   * New upstream version 1.2:
