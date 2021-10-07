@@ -349,6 +349,8 @@ check_deps lftp dpkg fuseiso rsync identify convert
 # Check if DISTRO_MAIN does provide netboot images
 [ "$DISTRO_MAIN" = "debian" ] || [ "$DISTRO_MAIN" = "ubuntu" ] || die "First release must be debian or ubuntu"
 
+# Check if we have GNU sed (we need some GNU extensions)
+sed --version | head -n 1 | grep -q "^sed (GNU sed)" || die "This script needs GNU variant of sed"
 
 #
 # Let's start
