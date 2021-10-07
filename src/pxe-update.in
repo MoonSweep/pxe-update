@@ -98,7 +98,7 @@ abort_loop() {
 # Download a single remote file: <URL> <local name>
 get_remote_file () {
   print_verbose "Downloading $1"
-  $LFTP_BIN -c "get1 $1 -o $2" > /dev/null 2>&1
+  $LFTP_BIN -c "set ssl:verify-certificate false; get1 $1 -o $2" > /dev/null 2>&1
   if [ $? -ne 0 ] ; then
     die "get_remote_file: problem occured while trying to download file $1"
   fi
@@ -107,14 +107,14 @@ get_remote_file () {
 # Find the latest file in a remote directory: <URL> <pattern>
 find_remote_latest_file () {
   # TODO Remove 2>/dev/null ? It's here to remove redirection messages
-  $LFTP_BIN -c "connect $1/ ; cls -1" 2>/dev/null | sed -n -E "/$2/{ s,[/@]$,, ; p }" | tail -n 1
+  $LFTP_BIN -c "set ssl:verify-certificate false; connect $1/ ; cls -1" 2>/dev/null | sed -n -E "/$2/{ s,[/@]$,, ; p }" | tail -n 1
 }
 
 # Check if remote directory exists: <URL>
 check_remote_dir () {
   [ -z "$1" ] && return 1
   print_verbose "Checking $1"
-  $LFTP_BIN -c "cd $1" > /dev/null 2>&1
+  $LFTP_BIN -c "set ssl:verify-certificate false; cd $1" > /dev/null 2>&1
 }
 
 # Mirror remote directory: <URL> <local directory>
@@ -122,7 +122,7 @@ mirror_remote_dir () {
   check_remote_dir "$1"
   if [ $? -eq 0 ] ; then
     print_verbose "Mirroring $1 to $2"
-    $LFTP_BIN -c "mirror $1 $2" > /dev/null 2>&1
+    $LFTP_BIN -c "set ssl:verify-certificate false; mirror $1 $2" > /dev/null 2>&1
     if [ $? -ne 0 ] ; then
       abort_loop "mirror_remote_dir: problem occured while trying to mirror directory $1"
     fi
