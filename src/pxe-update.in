@@ -47,7 +47,7 @@ LIVE_DESKTOP_LIST_DEBIAN_8="standard gnome-desktop kde-desktop xfce-desktop lxde
 LIVE_DESKTOP_LIST_DEBIAN_9="gnome kde xfce lxde mate cinnamon"
 LIVE_DESKTOP_LIST_UBUNTU="desktop"
 LIVE_DESKTOP_LIST_MINT="cinnamon mate kde xfce"
-LIVE_DESKTOP_LIST_LMDE="cinnamon mate"
+LIVE_DESKTOP_LIST_LMDE="cinnamon"
 PXE_KEYMAP=""
 PXE_THEME="default"
 PXE_BANNER=""
@@ -513,10 +513,10 @@ for RELEASE in $RELEASES_LIST ; do
       # Mint "Suite" conversion
       if [ -z "$MINT_STABLE" ] ; then
         get_remote_file "https://www.linuxmint.com/download.php" "$RELEASE_FILE"
-        MINT_STABLE="$(grep "^<h1>Download Linux Mint.*<\/h1>$" "$RELEASE_FILE" | sed -r -e "s/^<h1>Download Linux Mint [0-9\.]+ (\w+)<\/h1>$/\L\1/")"
+        MINT_STABLE="$(sed -n -E "/<h1 class=/{s/^.*Linux Mint [0-9\.]+ \"([A-Za-z]+)\"<\/h1>$/\L\1/ ; p ; q}" "$RELEASE_FILE")"
         delete_files "$RELEASE_FILE"
         get_remote_file "https://www.linuxmint.com/download_lmde.php" "$RELEASE_FILE"
-        MINT_LMDE="$(grep "^<h1>Download LMDE.*<\/h1>$" "$RELEASE_FILE" | sed -r -e "s/^<h1>Download LMDE [0-9\.]+ (\w+)<\/h1>$/\L\1/")"
+        MINT_LMDE="$(sed -n -E "/<h1 class=/{s/^.*LMDE [0-9\.]+ \"([A-Za-z]+)\"<\/h1>$/\L\1/ ; p ; q}" "$RELEASE_FILE")"
         delete_files "$RELEASE_FILE"
         print_debug_var "MINT_STABLE" "MINT_LMDE"
       fi
@@ -1028,8 +1028,11 @@ for RELEASE in $RELEASES_LIST ; do
               print_verbose "Creating $DISTRIB $CODENAME $ARCH menu file $CODENAME_ORIG_TXT_MENU_FILE"
               printf "" > $CODENAME_ORIG_TXT_MENU_FILE
 
-              print_verbose "Copying $DISTRIB splash screen $LIVE_CONTENTS_WORKDIR/isolinux/splash.png to $WORK_DIR/boot-screens"
-              cp -af "$LIVE_CONTENTS_WORKDIR/isolinux/splash.png" "$WORK_DIR/boot-screens"
+              LIVE_SPLASH_FILE="$LIVE_CONTENTS_WORKDIR/isolinux/splash.png"
+              if [ -e "$LIVE_SPLASH_FILE" ] ; then
+                print_verbose "Copying $DISTRIB splash screen $LIVE_SPLASH_FILE to $WORK_DIR/boot-screens"
+                cp -af "$LIVE_SPLASH_FILE" "$WORK_DIR/boot-screens"
+              fi
 
               print_verbose "Creating $DISTRIB $CODENAME standard menu file $WORK_DIR/boot-screens/stdmenu.cfg"
               printf "%s\n%s\n" \
